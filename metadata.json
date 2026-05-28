@@ -1,0 +1,8 @@
+{
+  "name": "Job Tracker and Resume Tailorer",
+  "description": "An automated job search tracker that lets you scrape listings, tailors resumes using Gemini AI with brutally honest critique, exports PDFs, and monitors Gmail for employer replies.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

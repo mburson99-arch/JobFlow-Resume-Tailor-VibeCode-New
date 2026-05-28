@@ -1,0 +1,12 @@
+node_modules/
+agents/
+*.egg-info/
+__pycache__/
+.venv/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example

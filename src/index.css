@@ -1,0 +1,150 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300..900;1,300..900&family=JetBrains+Mono:ital,wght@0,100..850;1,100..850&family=Space+Grotesk:wght@300..700&display=swap');
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-faction-bg: var(--faction-bg);
+  --color-faction-panel: var(--faction-panel);
+  --color-faction-panel-header: var(--faction-panel-header);
+  --color-faction-border: var(--faction-border);
+  --color-faction-accent-border: var(--faction-accent-border);
+  --color-faction-accent: var(--faction-accent);
+  --color-faction-primary: var(--faction-primary);
+  --color-faction-primary-hover: var(--faction-primary-hover);
+  --color-faction-text: var(--faction-text);
+  --color-faction-text-muted: var(--faction-text-muted);
+}
+
+/* Custom Faction Themes */
+.faction-alliance {
+  --faction-bg: #030712;             /* Deepest rich royal obsidian navy */
+  --faction-panel: #091024;          /* Regal Alliance Blue console */
+  --faction-panel-header: #0f1a3a;   /* Subdued cobalt dark header */
+  --faction-border: #1e2e60;         /* Pristine Steel Blue frame */
+  --faction-accent-border: #d4af37;  /* High King Gold border accent */
+  --faction-accent: #f59e0b;         /* Warm Crest Gold */
+  --faction-primary: #1d4ed8;        /* Royal Alliance Blue */
+  --faction-primary-hover: #2563eb;  /* Shield-charger Azure */
+  --faction-text: #f8fafc;           /* Crisp Silver White text */
+  --faction-text-muted: #94a3b8;     /* Sky steel gray */
+}
+
+.faction-horde {
+  --faction-bg: #070303;             /* Grim Batol volcanic obsidian */
+  --faction-panel: #140808;          /* Volcanic iron coal panel */
+  --faction-panel-header: #210d0d;   /* Blood crest Warchief header */
+  --faction-border: #4a1d1d;         /* Crushed iron ore border */
+  --faction-accent-border: #ef4444;  /* Orgrimmar blood crest border */
+  --faction-accent: #ef4444;         /* Fiery Crimson Crest Red */
+  --faction-primary: #991b1b;        /* Grom'gar blood red crimson */
+  --faction-primary-hover: #b91c1c;  /* Horde charge Red */
+  --faction-text: #fafaf9;           /* Bleached skeleton desert white */
+  --faction-text-muted: #a8a29e;     /* Dust stone grey */
+}
+
+html, body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  background-color: var(--faction-bg, #030712);
+  color: var(--faction-text, #f8fafc);
+}
+
+body {
+  font-family: var(--font-sans);
+}
+
+/* Print-safe specific hex colors because html2canvas crashes on oklch */
+.resume-preview-document {
+  font-family: "Inter", sans-serif;
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.6;
+  background-color: #ffffff;
+  word-wrap: break-word;
+}
+.resume-preview-document h1 {
+  font-size: 26px;
+  font-weight: 800;
+  color: #0f172a;
+  border-bottom: 3px solid #334155;
+  padding-bottom: 6px;
+  margin-top: 0;
+  margin-bottom: 16px;
+  line-height: 1.2;
+}
+.resume-preview-document h2 {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+  border-bottom: 2px solid #e2e8f0;
+  padding-bottom: 4px;
+  margin-top: 20px;
+  margin-bottom: 10px;
+  letter-spacing: 0.05em;
+}
+.resume-preview-document h3 {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+  margin-top: 16px;
+  margin-bottom: 8px;
+}
+.resume-preview-document p {
+  margin-top: 0;
+  margin-bottom: 12px;
+}
+.resume-preview-document ul {
+  padding-left: 20px;
+  margin-top: 0;
+  margin-bottom: 12px;
+  list-style-type: disc;
+}
+.resume-preview-document ol {
+  padding-left: 20px;
+  margin-top: 0;
+  margin-bottom: 12px;
+  list-style-type: decimal;
+}
+.resume-preview-document li {
+  margin-bottom: 4px;
+}
+.resume-preview-document li > p {
+  display: inline;
+}
+.resume-preview-document a {
+  color: #2563eb;
+  text-decoration: none;
+}
+.resume-preview-document strong {
+  font-weight: 700;
+  color: #0f172a;
+}
+.resume-preview-document code {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  background-color: #f1f5f9;
+  padding: 2px 4px;
+  border-radius: 4px;
+  color: #0f172a;
+}
+
+/* Enforce strict page breaking during PDF rendering with html2pdf.js */
+.resume-preview-document h1,
+.resume-preview-document h2,
+.resume-preview-document h3 {
+  page-break-inside: avoid !important;
+  break-inside: avoid !important;
+  page-break-after: avoid !important;
+  break-after: avoid !important;
+}
+
+.resume-preview-document p,
+.resume-preview-document li {
+  page-break-inside: avoid !important;
+  break-inside: avoid !important;
+}
+

@@ -4,6 +4,7 @@ import {
   XCircle, AlertTriangle, Eye, ShieldAlert, Award, ArrowRight,
   Sparkles, Mail, LayoutGrid, FileText, Bot, Terminal, RefreshCw, Send, GitCommit, FileCode, Check, Shield
 } from 'lucide-react';
+import { CandidateProfile } from '../types';
 
 interface LogMessage {
   id: string;
@@ -13,10 +14,30 @@ interface LogMessage {
   message: string;
 }
 
-export default function ProjectExport() {
+interface ProjectExportProps {
+  profile: CandidateProfile;
+  onUpdateProfile: (profile: CandidateProfile) => void;
+}
+
+export default function ProjectExport({ profile, onUpdateProfile }: ProjectExportProps) {
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
   const [selectedMockup, setSelectedMockup] = useState<'dashboard' | 'tailor' | 'emails' | 'bot'>('bot');
-  const [showExportModal, setShowExportModal] = useState(false);
+  const [githubProfileUrl, setGithubProfileUrl] = useState(() => {
+    try {
+      return localStorage.getItem('jobflow_github_profile_url') || profile.githubProfileUrl || profile.website || '';
+    } catch {
+      return profile.githubProfileUrl || profile.website || '';
+    }
+  });
+  const [githubProfileSummary, setGithubProfileSummary] = useState(() => {
+    try {
+      return localStorage.getItem('jobflow_github_profile_summary') || profile.githubProfileSummary || '';
+    } catch {
+      return profile.githubProfileSummary || '';
+    }
+  });
+  const [isGeneratingGithubSummary, setIsGeneratingGithubSummary] = useState(false);
+  const [githubSaveState, setGithubSaveState] = useState<'idle' | 'saved' | 'error'>('idle');
   
   // Terminal bot parameters
   const [terminalLogs, setTerminalLogs] = useState<LogMessage[]>([
@@ -89,6 +110,88 @@ export default function ProjectExport() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [currentCommitHash, setCurrentCommitHash] = useState('bf73c1d');
 
+  useEffect(() => {
+    const nextUrl = profile.githubProfileUrl || profile.website || '';
+    const nextSummary = profile.githubProfileSummary || '';
+
+    if (nextUrl && nextUrl !== githubProfileUrl) {
+      setGithubProfileUrl(nextUrl);
+    }
+    if (nextSummary && nextSummary !== githubProfileSummary) {
+      setGithubProfileSummary(nextSummary);
+    }
+  }, [profile.githubProfileUrl, profile.website, profile.githubProfileSummary]);
+
+  const persistGithubProfile = async (nextUrl = githubProfileUrl, nextSummary = githubProfileSummary) => {
+    const normalizedUrl = nextUrl.trim();
+    const updatedProfile: CandidateProfile = {
+      ...profile,
+      website: normalizedUrl || profile.website,
+      githubProfileUrl: normalizedUrl,
+      githubProfileSummary: nextSummary,
+    };
+
+    try {
+      localStorage.setItem('jobflow_github_profile_url', normalizedUrl);
+      localStorage.setItem('jobflow_github_profile_summary', nextSummary);
+      localStorage.setItem('jobflow_profile', JSON.stringify(updatedProfile));
+    } catch {}
+
+    onUpdateProfile(updatedProfile);
+    setGithubSaveState('saved');
+    window.setTimeout(() => setGithubSaveState('idle'), 2200);
+  };
+
+  const handleGithubUrlChange = (nextUrl: string) => {
+    setGithubProfileUrl(nextUrl);
+    try {
+      localStorage.setItem('jobflow_github_profile_url', nextUrl);
+      localStorage.setItem('jobflow_profile', JSON.stringify({
+        ...profile,
+        website: nextUrl.trim() || profile.website,
+        githubProfileUrl: nextUrl,
+        githubProfileSummary,
+      }));
+    } catch {}
+  };
+
+  const handleGenerateGithubSummary = async () => {
+    const normalizedUrl = githubProfileUrl.trim();
+    if (!normalizedUrl) {
+      setGithubSaveState('error');
+      return;
+    }
+
+    setIsGeneratingGithubSummary(true);
+    setGithubSaveState('idle');
+
+    try {
+      await persistGithubProfile(normalizedUrl, githubProfileSummary);
+      const resp = await fetch('/api/profile/github-summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          githubProfileUrl: normalizedUrl,
+          resumeText: profile.resumeText,
+        }),
+      });
+
+      if (!resp.ok) {
+        throw new Error('GitHub AI summary request failed.');
+      }
+
+      const data = await resp.json();
+      const summary = String(data.summary || '').trim();
+      setGithubProfileSummary(summary);
+      await persistGithubProfile(normalizedUrl, summary);
+    } catch (err) {
+      console.error('Failed to generate GitHub profile summary:', err);
+      setGithubSaveState('error');
+    } finally {
+      setIsGeneratingGithubSummary(false);
+    }
+  };
+
   const handleCopy = (text: string, section: string) => {
     navigator.clipboard.writeText(text);
     setCopiedSection(section);
@@ -155,7 +258,7 @@ export default function ProjectExport() {
       } else if (textLower.includes('indeed') || textLower.includes('linkedin') || textLower.includes('mercer')) {
         botResponse = 'DYNAMIC PARSER REPORT: Mercer Indeed mapping checks are active. Scoring algorithm parameters aligned (weight threshold: 4.0; string-token scanning active). No data lost.';
       } else if (textLower.includes('resume') || textLower.includes('tailor') || textLower.includes('polish')) {
-        botResponse = 'WRITER CONTROLLER: Resume structure checked. Active Directory, Splunk, and CompTIA references remain grounded and readable.';
+        botResponse = 'WRITER CONTROLLER: Structural templates validated. Active Directory, Splunk logging, and CompTIA parameters injected properly. Filtered out AI slop verbiage.';
       } else if (textLower.includes('commit') || textLower.includes('push') || textLower.includes('github')) {
         botResponse = 'GIT HANDSHAKE: Generating sanitized commit payload... Abstracting user emails and token structures. Clean markdown output pushed to GitHub indexes.';
       } else {
@@ -217,7 +320,7 @@ npm run build
 \`\`\`
 `;
 
-  const aboutContent = `JobFlow combines Google Gemini AI model capabilities and live Google Workspace APIs into a secure, single-screen career manager. Built using React, Tailwind Utility styling, and persistent local caching layers, the app serves as a robust tool for job hunters to streamline their daily pipelines, and preserve record trace logs without exposing data to external systems.`;
+  const aboutContent = githubProfileSummary || `Add your GitHub profile URL, then generate a first-person hiring-manager style summary that explains what your GitHub shows.`;
 
   return (
     <div className="flex-1 overflow-y-auto bg-white rounded-xl border border-slate-200 shadow-sm p-6" id="project-export-panel">
@@ -237,6 +340,88 @@ npm run build
           <span className="text-[10px] font-black uppercase text-blue-700 tracking-wider">Bot Active & Tracking</span>
         </div>
       </div>
+
+      <section className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm mb-6">
+        <div className="flex flex-col lg:flex-row lg:items-start gap-4">
+          <div className="flex-1 space-y-3">
+            <div>
+              <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 flex items-center gap-2">
+                <Github className="w-4 h-4 text-blue-600" />
+                GitHub Profile Selector
+              </h3>
+              <p className="text-[11px] text-slate-500 mt-1">
+                This URL is saved immediately to your candidate profile and a local backup so it survives reloads and installer restarts.
+              </p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="url"
+                value={githubProfileUrl}
+                onChange={(e) => handleGithubUrlChange(e.target.value)}
+                onBlur={() => persistGithubProfile()}
+                placeholder="https://github.com/your-profile"
+                className="flex-1 px-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white"
+              />
+              <button
+                type="button"
+                onClick={handleGenerateGithubSummary}
+                disabled={isGeneratingGithubSummary}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+              >
+                <Sparkles className={`w-4 h-4 ${isGeneratingGithubSummary ? 'animate-spin' : ''}`} />
+                {isGeneratingGithubSummary ? 'Writing Summary...' : 'Generate AI Summary'}
+              </button>
+            </div>
+
+            {githubSaveState === 'saved' && (
+              <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 font-semibold">
+                GitHub profile saved permanently to your profile.
+              </p>
+            )}
+            {githubSaveState === 'error' && (
+              <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 font-semibold">
+                Add a valid GitHub profile URL, then try generating the summary again.
+              </p>
+            )}
+          </div>
+
+          <div className="lg:w-[44%] bg-slate-50 border border-slate-200 rounded-xl p-4">
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 flex items-center gap-2">
+                <Bot className="w-4 h-4 text-blue-600" />
+                AI GitHub Profile Summary
+              </h3>
+              <button
+                onClick={() => handleCopy(githubProfileSummary || aboutContent, 'github-summary')}
+                className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
+              >
+                {copiedSection === 'github-summary' ? <CheckCircle className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                {copiedSection === 'github-summary' ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+            <textarea
+              rows={6}
+              value={githubProfileSummary}
+              onChange={(e) => {
+                setGithubProfileSummary(e.target.value);
+                try {
+                  localStorage.setItem('jobflow_github_profile_summary', e.target.value);
+                  localStorage.setItem('jobflow_profile', JSON.stringify({
+                    ...profile,
+                    website: githubProfileUrl.trim() || profile.website,
+                    githubProfileUrl,
+                    githubProfileSummary: e.target.value,
+                  }));
+                } catch {}
+              }}
+              onBlur={() => persistGithubProfile(githubProfileUrl, githubProfileSummary)}
+              placeholder="The AI-generated first-person GitHub summary will appear here, and you can edit it before it is saved onto your profile."
+              className="w-full text-xs p-3 border border-slate-300 rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 leading-relaxed resize-none"
+            />
+          </div>
+        </div>
+      </section>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* Left Column - Documentation, Failures, and History */}
@@ -326,12 +511,12 @@ npm run build
             </pre>
           </section>
 
-          {/* About Segment */}
+          {/* AI GitHub Profile Summary Segment */}
           <section className="bg-slate-50 rounded-xl p-5 border border-slate-200 shadow-xs">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-2">
                 <Info className="w-4 h-4 text-blue-600" />
-                Repository Short Description
+                AI Summary: What This GitHub Shows
               </h3>
               <button
                 onClick={() => handleCopy(aboutContent, 'about')}
@@ -346,157 +531,46 @@ npm run build
             </p>
           </section>
 
-          {/* Standalone PC Desktop Suit Launcher (Option 2) */}
-          <section className="bg-slate-900 text-white rounded-xl p-5 border border-slate-950 shadow-md relative overflow-hidden" id="desktop-integration-option-2">
-            <div className="absolute -top-12 -right-12 w-24 h-24 bg-blue-600/10 rounded-full blur-xl"></div>
-            
-            <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-800">
-              <h3 className="text-xs font-black uppercase tracking-wider text-blue-400 flex items-center gap-2">
-                <Terminal className="w-4 h-4 text-blue-400" />
-                Option 2: Standalone PC Launcher Suite
-              </h3>
-              <span className="text-[9px] font-black uppercase tracking-wider bg-blue-500/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded">
-                Generated & Ready
-              </span>
-            </div>
-
-            <p className="text-[11.5px] text-slate-400 mb-4 font-sans leading-relaxed">
-              You chose <strong>Option 2</strong>! We have customized and written automated standalone double-clickable launch scripts directly into your project's root folder. Simply export this project as a ZIP and you are ready to run offline.
+          {/* Conceptual Future Updates Section */}
+          <section className="bg-slate-50 rounded-xl p-5 border border-slate-200 shadow-xs">
+            <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-2 mb-3">
+              <Sparkles className="w-4 h-4 text-amber-500" />
+              Future Roadmap Expansion (v2.0 Concepts)
+            </h3>
+            <p className="text-[11px] text-slate-500 mb-4 font-sans">
+              Proposed technical concepts to further iterate on JobFlow's autonomous tracking features:
             </p>
-
-            <div className="space-y-3 font-sans">
-              
-              {/* Windows Script Indicator */}
-              <div className="p-3 bg-slate-950/60 rounded-lg border border-slate-800 flex items-start gap-3">
-                <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center border border-blue-500/20 shrink-0 text-blue-400 font-mono text-[11px] font-bold">
-                  .bat
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold text-slate-100">Run-JobFlow-Windows.bat</h4>
-                  <p className="text-[10px] text-slate-400 mt-0.5 leading-normal">
-                    Double-click launcher for Windows. Performs Node.js health checks, provisions dependencies automatically, copy templates, and opens your browser directly on port 3000.
-                  </p>
-                  <div className="flex items-center gap-1.5 mt-2">
-                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
-                    <span className="text-[8.5px] font-mono text-emerald-400">Written to project root</span>
-                  </div>
-                </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="p-3 bg-white rounded-lg border border-slate-200 shadow-2xs">
+                <span className="text-[9px] font-black uppercase tracking-wider text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded inline-block mb-1.5">Ecosystem Expansion</span>
+                <h4 className="text-xs font-bold text-slate-800">1. Multi-Mailbox Connection</h4>
+                <p className="text-[10px] text-slate-500 mt-1 leading-normal">
+                  Extend listeners to sync notifications directly across Microsoft Outlook, Exchange ports, Yahoo, and specialized corporate tracking inboxes.
+                </p>
               </div>
 
-              {/* Mac / Linux Script Indicator */}
-              <div className="p-3 bg-slate-950/60 rounded-lg border border-slate-800 flex items-start gap-3">
-                <div className="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20 shrink-0 text-indigo-400 font-mono text-[11px] font-bold">
-                  .sh
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold text-slate-100">Run-JobFlow-MacLinux.sh</h4>
-                  <p className="text-[10px] text-slate-400 mt-0.5 leading-normal">
-                    Interactive executable terminal script. Stáges local environmental variables, setups local caches, and registers listener processes on your Apple Mac or Linux system.
-                  </p>
-                  <div className="flex items-center gap-1.5 mt-2">
-                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
-                    <span className="text-[8.5px] font-mono text-emerald-400">Written to project root</span>
-                  </div>
-                </div>
+              <div className="p-3 bg-white rounded-lg border border-slate-200 shadow-2xs">
+                <span className="text-[9px] font-black uppercase tracking-wider text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded inline-block mb-1.5">Intelligence</span>
+                <h4 className="text-xs font-bold text-slate-800">2. Semantic Search (RAG)</h4>
+                <p className="text-[10px] text-slate-500 mt-1 leading-normal">
+                  Employ localized vector databases to measure the urgency of scheduling feedback and warn candidates about time limits.
+                </p>
               </div>
 
-              {/* Setup guide pointer */}
-              <div className="p-3 bg-blue-950/45 border border-blue-900/40 rounded-lg flex gap-2.5">
-                <Shield className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
-                <div>
-                  <h4 className="text-[11px] font-bold text-blue-300 uppercase shrink-0">LOCAL-SETUP.md Included</h4>
-                  <p className="text-[10px] text-slate-300 mt-1 leading-normal">
-                    We've written a complete, detailed setup guide file directly in your workspace. You can consult it anytime to adjust local Gemini API Keys and port configurations on your host computer.
-                  </p>
-                </div>
+              <div className="p-3 bg-white rounded-lg border border-slate-200 shadow-2xs">
+                <span className="text-[9px] font-black uppercase tracking-wider text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded inline-block mb-1.5">Response Loop</span>
+                <h4 className="text-xs font-bold text-slate-800">3. Autonomous Drafter</h4>
+                <p className="text-[10px] text-slate-500 mt-1 leading-normal">
+                  Generate instant candidate reply suggestions customized exactly according to your profile resume and target criteria records.
+                </p>
               </div>
 
-            </div>
-
-            {/* Seamless Stateful Export Guidance Panel */}
-            {showExportModal && (
-              <div className="mt-4 p-4 bg-slate-950 border border-blue-500/30 rounded-lg font-sans text-left animate-in fade-in duration-200">
-                <div className="flex items-center justify-between mb-3 pb-1.5 border-b border-slate-800/80">
-                  <span className="text-[10.5px] font-black uppercase tracking-wider text-blue-400 flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5" />
-                    How to Export to Your PC (Double-Click Ready)
-                  </span>
-                  <button 
-                    onClick={() => setShowExportModal(false)}
-                    className="text-xs text-slate-400 hover:text-slate-200 cursor-pointer p-0.5"
-                  >
-                    Close
-                  </button>
-                </div>
-                
-                <div className="space-y-4">
-                  {/* Step 1 */}
-                  <div className="flex gap-2.5 items-start">
-                    <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-400 text-[10px] font-bold shrink-0 mt-0.5">
-                      1
-                    </span>
-                    <div>
-                      <h4 className="text-[11px] font-bold text-slate-200">Locate Export Button In Tool Header</h4>
-                      <p className="text-[10px] text-slate-400 mt-0.5 leading-normal">
-                        Look at the **top bar menu options** or the **Settings menu** of the AI Studio website (the browser chrome surrounding this application). Click on the <strong>Export</strong> option, or use the menu in the upper right.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Step 2 */}
-                  <div className="flex gap-2.5 items-start">
-                    <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-400 text-[10px] font-bold shrink-0 mt-0.5">
-                      2
-                    </span>
-                    <div>
-                      <h4 className="text-[11px] font-bold text-slate-200">Download as "Export as ZIP"</h4>
-                      <p className="text-[10px] text-slate-400 mt-0.5 leading-normal">
-                        Select <strong>Export as ZIP</strong>. This packages your entire application codebase, database JSON repositories, and all startup scripts into a single file and downloads it to your computer.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Step 3 */}
-                  <div className="flex gap-2.5 items-start">
-                    <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-400 text-[10px] font-bold shrink-0 mt-0.5">
-                      3
-                    </span>
-                    <div>
-                      <h4 className="text-[11px] font-bold text-slate-200">Unzip & Launch locally</h4>
-                      <p className="text-[10px] text-slate-400 mt-0.5 leading-normal">
-                        Unzip the downloaded folder, then double-click <strong>Run-JobFlow-Windows.bat</strong>. The batch file takes care of everything (Node.js checking, silent initialization, and launching your browser naturally)!
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-3.5 pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-[9px] text-slate-500">
-                  <span>Privacy-first offline storage model active</span>
-                  <span>Standalone Option 2 Suite</span>
-                </div>
-              </div>
-            )}
-
-            <div className="mt-4 border-t border-slate-800 pt-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
-              <div className="text-[10.5px] text-slate-400 text-center sm:text-left">
-                {showExportModal ? "Displaying step-by-step export setup guide:" : "Ready to download and play on your computer?"}
-              </div>
-              <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-                <button 
-                  onClick={() => setShowExportModal(!showExportModal)}
-                  className="px-3.5 py-1.5 border border-slate-700 hover:border-slate-500 hover:bg-slate-800 text-slate-300 rounded text-[10.5px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-97"
-                >
-                  <Info className="w-3.5 h-3.5 text-slate-400" />
-                  {showExportModal ? "Hide Info" : "Setup Guide Instructions"}
-                </button>
-                <a 
-                  href="/api/export/download-zip" 
-                  download="JobFlow-Standalone-Suite.zip"
-                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-[10.5px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer shadow-md transition-all hover:scale-102 active:scale-97 select-none text-center sm:text-left"
-                >
-                  <RefreshCw className="w-3.5 h-3.5 text-blue-200 animate-pulse" />
-                  Download Standalone App (.ZIP)
-                </a>
+              <div className="p-3 bg-white rounded-lg border border-slate-200 shadow-2xs">
+                <span className="text-[9px] font-black uppercase tracking-wider text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded inline-block mb-1.5">Training</span>
+                <h4 className="text-xs font-bold text-slate-800">4. Interactive Screenings</h4>
+                <p className="text-[10px] text-slate-500 mt-1 leading-normal">
+                  Pre-screen interactive live questions modeled directly off incoming isolated corporate communications.
+                </p>
               </div>
             </div>
           </section>
@@ -625,7 +699,7 @@ npm run build
                     />
                     <button
                       type="submit"
-                      className="p-1.5 bg-slate-905 bg-slate-900 text-white rounded-md cursor-pointer hover:bg-slate-800 transition-all shadow"
+                      className="p-1.5 bg-slate-900 text-white rounded-md cursor-pointer hover:bg-slate-800 transition-all shadow"
                     >
                       <Send className="w-3.5 h-3.5" />
                     </button>

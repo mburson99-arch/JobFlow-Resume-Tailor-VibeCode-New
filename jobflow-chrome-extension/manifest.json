@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "JobFlow Scraper Attachment",
+  "version": "1.1",
+  "description": "Scrape Indeed and LinkedIn jobs and sync them into the local JobFlow desktop app.",
+  "permissions": ["activeTab", "tabs"],
+  "host_permissions": [
+    "http://localhost:3000/*",
+    "http://127.0.0.1:3000/*",
+    "*://*.indeed.com/*",
+    "*://indeed.com/*",
+    "*://*.linkedin.com/*",
+    "*://linkedin.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.indeed.com/*",
+        "*://indeed.com/*",
+        "*://*.linkedin.com/*",
+        "*://linkedin.com/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

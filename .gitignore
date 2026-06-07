@@ -10,3 +10,8 @@ coverage/
 *.log
 .env*
 !.env.example
+release/
+release-small/
+build-log.txt
+installer-log.txt
+*_db.json

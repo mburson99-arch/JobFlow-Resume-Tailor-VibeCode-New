@@ -58,7 +58,7 @@ export default function GeminiSearchAssistant() {
     <div className="bg-faction-bg rounded p-4 border border-faction-border shadow-md">
       <div className="flex items-center gap-2 mb-4 border-b border-faction-border pb-2">
         <Sparkles className="w-4 h-4 text-faction-accent" />
-        <span className="text-faction-accent font-bold uppercase tracking-widest text-[10px]">Gemini Search Keywords Assistant</span>
+        <span className="text-faction-accent font-bold uppercase tracking-widest text-[10px]">Claude Search Keywords Assistant</span>
       </div>
 
       <div className="flex flex-col md:flex-row gap-4">
@@ -84,11 +84,11 @@ export default function GeminiSearchAssistant() {
             >
               {isLoading ? (
                 <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating...
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Asking Claude...
                 </>
               ) : (
                 <>
-                  <Search className="w-3.5 h-3.5" /> Ask Gemini
+                  <Search className="w-3.5 h-3.5" /> Ask Claude
                 </>
               )}
             </button>
@@ -100,14 +100,14 @@ export default function GeminiSearchAssistant() {
         <div className="w-full md:w-2/3 border-l border-faction-border pl-0 md:pl-4">
           {!result && !isLoading && (
              <div className="h-full flex flex-col items-center justify-center text-slate-500 italic text-xs p-4">
-                Describe the type of work you enjoy or want to do on the left. Gemini will generate optimized search queries, keywords, and alternative job titles to assist your hunt.
+                Describe the type of work you enjoy or want to do on the left. Claude will generate optimized search queries, keywords, and alternative job titles to assist your hunt.
              </div>
           )}
 
           {isLoading && (
             <div className="h-full flex flex-col items-center justify-center text-slate-400 text-xs gap-3">
                <Loader2 className="w-6 h-6 animate-spin text-faction-accent" />
-               Consulting Gemini for the best recruiter keywords...
+               Consulting Claude for the best recruiter keywords...
             </div>
           )}
 

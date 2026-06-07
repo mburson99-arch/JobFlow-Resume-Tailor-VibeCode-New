@@ -6,8 +6,8 @@ export default function ExtensionPanel() {
   const [copiedBackground, setCopiedBackground] = useState(false);
   const [copiedScript, setCopiedScript] = useState(false);
 
-  // Determine current window origin safely
-  const currentOrigin = typeof window !== "undefined" ? window.location.origin : "https://ais-dev-ft2kquwyh6vcoeqtuxptoq-556362956929.us-west2.run.app";
+  // Desktop app always exposes the local API here.
+  const currentOrigin = "http://localhost:3000";
 
   const manifestCode = `{
   "manifest_version": 3,
@@ -30,7 +30,8 @@ export default function ExtensionPanel() {
         "*://*.linkedin.com/*",
         "*://linkedin.com/*",
         "*://*.run.app/*",
-        "http://localhost/*"
+        "http://localhost/*",
+        "http://127.0.0.1/*"
       ],
       "js": ["content.js"],
       "run_at": "document_end",
@@ -47,24 +48,50 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     console.log("⚡ [JobFlow Background] Posting scraped job to JobFlow URL:", request.url);
     console.log("⚡ [JobFlow Background] Saved payload data:", request.data);
 
+    const targetUrls = Array.from(new Set([
+      request.url,
+      "http://localhost:3000/api/jobs/scrape",
+      "http://127.0.0.1:3000/api/jobs/scrape"
+    ]));
+
+    const postToFirstAvailableJobFlow = async () => {
+      let lastError = "";
+
+      for (const targetUrl of targetUrls) {
+        try {
+          console.log("⚡ [JobFlow Background] Trying local API:", targetUrl);
+          const response = await fetch(targetUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify(request.data)
+          });
+
+          console.log("⚡ [JobFlow Background] Response Status:", response.status, response.statusText);
+          if (response.ok) {
+            return { success: true, targetUrl };
+          }
+
+          lastError = "Server status " + response.status + ": " + await response.text();
+        } catch (err) {
+          lastError = err && err.message ? err.message : String(err);
+          console.warn("⚡ [JobFlow Background] Local API failed:", targetUrl, lastError);
+        }
+      }
+
+      return { success: false, error: lastError || "Could not reach JobFlow local API" };
+    };
+
     // 1. Post to workspace API endpoint
-    fetch(request.url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(request.data)
-    })
-    .then(async (response) => {
-      console.log("⚡ [JobFlow Background] Response Status:", response.status, response.statusText);
-      const isOk = response.ok;
-      const text = isOk ? "" : await response.text();
+    postToFirstAvailableJobFlow()
+    .then((result) => {
 
       // 2. ALSO broadcast directly to any open JobFlow tabs in this browser context!
       // This is 100% reliable and bypasses any serverless/container-idle file resets.
       chrome.tabs.query({}, (tabs) => {
         tabs.forEach((tab) => {
-          if (tab.id && tab.url && (tab.url.indexOf("run.app") !== -1 || tab.url.indexOf("localhost") !== -1)) {
+          if (tab.id && tab.url && (tab.url.indexOf("run.app") !== -1 || tab.url.indexOf("localhost") !== -1 || tab.url.indexOf("127.0.0.1") !== -1)) {
             chrome.tabs.sendMessage(tab.id, {
               action: "directJobSync",
               data: request.data
@@ -76,12 +103,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
       });
 
-      if (isOk) {
-        console.log("⚡ [JobFlow Background] Saved successfully into spreadsheet database.");
-        sendResponse({ success: true });
+      if (result.success) {
+        console.log("⚡ [JobFlow Background] Saved successfully into JobFlow database at " + result.targetUrl);
+        sendResponse({ success: true, targetUrl: result.targetUrl });
       } else {
-        console.error("⚡ [JobFlow Background] Server response error message:", text);
-        sendResponse({ success: false, error: "Server status " + response.status + ": " + text });
+        console.error("⚡ [JobFlow Background] Server response error message:", result.error);
+        sendResponse({ success: false, error: result.error });
       }
     })
     .catch((err) => {
@@ -89,7 +116,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // Even if server connection is temporary down, still broadcast to active tabs
       chrome.tabs.query({}, (tabs) => {
         tabs.forEach((tab) => {
-          if (tab.id && tab.url && (tab.url.indexOf("run.app") !== -1 || tab.url.indexOf("localhost") !== -1)) {
+          if (tab.id && tab.url && (tab.url.indexOf("run.app") !== -1 || tab.url.indexOf("localhost") !== -1 || tab.url.indexOf("127.0.0.1") !== -1)) {
             chrome.tabs.sendMessage(tab.id, {
               action: "directJobSync",
               data: request.data
@@ -109,7 +136,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 console.log("⚡ [JobFlow Scraper] Content script loaded successfully on " + window.location.href);
 
 // Check if this script is injected in a JobFlow workspace page
-const isJobFlowPage = window.location.href.includes("run.app") || window.location.href.includes("localhost");
+const isJobFlowPage = window.location.href.includes("run.app") || window.location.href.includes("localhost") || window.location.href.includes("127.0.0.1");
 
 if (isJobFlowPage) {
   console.log("⚡ [JobFlow Scraper] Detected JobFlow Active Dashboard! Activating direct sync messenger.");
@@ -294,6 +321,19 @@ setInterval(injectFloatingButton, 5000);
         </h2>
         <p className="text-xs text-slate-500 mt-1">
           Install this custom localized script inside Google Chrome to fetch Indeed and LinkedIn listings. Clicking it immediately appends live jobs into our primary spreadsheet dashboard!
+        </p>
+      </div>
+
+      <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-900">
+        <div className="font-black uppercase text-[10.5px] mb-1">Stable Extension Folder</div>
+        <p className="leading-relaxed">
+          Use Chrome Developer Mode's <strong>Load unpacked</strong> button and select:
+          <code className="block mt-2 bg-white border border-emerald-100 rounded px-2 py-1 text-[10px] text-slate-800 break-all">
+            C:\Users\Hubby\Downloads\job-tracker-and-resume-tailorer (1)\jobflow-chrome-extension
+          </code>
+        </p>
+        <p className="mt-2 text-[10px] text-emerald-700">
+          If the extension is already installed, click its Reload button in <code>chrome://extensions</code>, then refresh the Indeed/LinkedIn job tab.
         </p>
       </div>
 

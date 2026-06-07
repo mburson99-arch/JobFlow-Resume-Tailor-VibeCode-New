@@ -38,6 +38,7 @@ export default function Configuration({ profile, onUpdateProfile, onResetPipelin
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onUpdateProfile({
+      ...profile,
       name,
       email,
       phone,
@@ -159,13 +160,13 @@ export default function Configuration({ profile, onUpdateProfile, onResetPipelin
               <h4 className="text-xs uppercase tracking-wide">Workspace Security</h4>
             </div>
             <p className="text-[11.5px] text-slate-500 leading-relaxed">
-              JobFlow operates securely within standard node containers. API keys are managed externally via <strong>Secrets settings panel</strong> in Google AI Studio and are never leaked to client side scripts during runtime routing.
+              JobFlow reads Gemini from the desktop app environment variable <strong>GEMINI_API_KEY</strong>. If that key is missing, AI tailoring and refinement now stop with an error instead of returning fake simulated success.
             </p>
 
             <div className="space-y-2.5 pt-2">
               <div className="flex items-center gap-2 text-[11px] text-slate-600">
-                <span className="w-2 h-2 rounded bg-green-500 shrink-0"></span>
-                <span>Gemini API Node: Connected</span>
+                <span className="w-2 h-2 rounded bg-amber-500 shrink-0"></span>
+                <span>Gemini API Node: Requires GEMINI_API_KEY</span>
               </div>
               <div className="flex items-center gap-2 text-[11px] text-slate-600">
                 <span className="w-2 h-2 rounded bg-green-500 shrink-0"></span>

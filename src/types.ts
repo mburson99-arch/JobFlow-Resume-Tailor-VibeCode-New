@@ -23,6 +23,8 @@ export interface CandidateProfile {
   phone: string;
   website: string;
   resumeText: string;
+  githubProfileUrl?: string;
+  githubProfileSummary?: string;
 }
 
 export interface EmailAlert {

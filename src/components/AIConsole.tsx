@@ -38,7 +38,7 @@ export default function AIConsole({ logs, onClearLogs }: AIConsoleProps) {
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[9px] bg-faction-accent/15 text-faction-accent border border-faction-accent-border/40 px-2.5 py-0.5 rounded font-black uppercase font-mono">
-              Gemini-2.5-Flash
+              Claude Sonnet
             </span>
           </div>
         </div>

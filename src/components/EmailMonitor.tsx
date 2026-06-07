@@ -1,9 +1,6 @@
-import React, { useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { Job } from "../types";
 import { MailOpen, Bell, AlertTriangle, RefreshCw, Trash2, Mail, Briefcase, Inbox, Filter, ExternalLink } from "lucide-react";
-import { GoogleUser } from "../lib/googleAuth";
-import { JOBFLOW_GMAIL_LABEL_NAME } from "../lib/gmailLabels";
-import { matchEmailToJob } from "../lib/emailMatcher";
 
 interface EmailMonitorProps {
   jobs: Job[];
@@ -14,13 +11,12 @@ interface EmailMonitorProps {
   needsAuth: boolean;
   isLoggingIn: boolean;
   token: string | null;
-  user: GoogleUser | null;
+  user: any | null;
   isDemoMode: boolean;
   onStartDemoMode: () => void;
   onLogin: () => void;
   onLogout: () => void;
   onDeleteEmail: (id: string) => void;
-  hiddenEmailIds: string[];
   onRefreshEmails: () => void;
   selectedCompanyJob: string | null;
   onSelectCompanyJob: (val: string | null) => void;
@@ -53,13 +49,19 @@ export default function EmailMonitor({
   onLogin,
   onLogout,
   onDeleteEmail,
-  hiddenEmailIds,
   onRefreshEmails,
   selectedCompanyJob,
   onSelectCompanyJob,
   isSyncActive,
   onToggleSync
 }: EmailMonitorProps) {
+  const [googleClientId, setGoogleClientId] = useState(() => {
+    try {
+      return localStorage.getItem("jobflow_google_client_id") || "";
+    } catch {
+      return "";
+    }
+  });
 
   // Dismissed individual pipeline subcategories ("close to clear from sight, allow auto reopening on update")
   const [dismissedCategories, setDismissedCategories] = useState<Record<string, { emailCount: number; status: string }>>(() => {
@@ -90,51 +92,202 @@ export default function EmailMonitor({
     return saved.emailCount === emailCount && saved.status === status;
   };
 
-  // Group emails by the shared matcher so the tracker and monitor stay consistent.
-  const groupedJobs: Record<string, { job: Job, emails: ParsedEmail[] }> = {};
-  
-  jobs.forEach(job => {
-    const key = `${job.company}-${job.title}`;
-    groupedJobs[key] = { job, emails: [] };
-  });
-  
-  const untrackedEmails: ParsedEmail[] = [];
-  const emailJobMap: Record<string, Job> = {};
-
-  emails.forEach(email => {
-    const match = matchEmailToJob(email, jobs);
-    if (match) {
-      const matchedJobKey = `${match.job.company}-${match.job.title}`;
-      groupedJobs[matchedJobKey].emails.push(email);
-      emailJobMap[email.id] = match.job;
-    } else {
-      untrackedEmails.push(email);
+  // Persistent local deletion state ("delete from sight")
+  const [hiddenEmailIds, setHiddenEmailIds] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem("jobflow_hidden_email_ids");
+      return stored ? JSON.parse(stored) : [];
+    } catch (e) {
+      return [];
     }
   });
+
+  useEffect(() => {
+    const handleStorageChange = () => {
+      try {
+        const stored = localStorage.getItem("jobflow_hidden_email_ids");
+        setHiddenEmailIds(stored ? JSON.parse(stored) : []);
+      } catch (e) {
+        setHiddenEmailIds([]);
+      }
+    };
+    handleStorageChange();
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, [jobs]);
+
+  // Grouping logic with STRICT BRAND MATCHING to keep common word clutter ("clutter bullshit") out
+  const { groupedJobs, untrackedEmails, emailJobMap } = useMemo(() => {
+    const nextGroupedJobs: Record<string, { job: Job, emails: ParsedEmail[] }> = {};
+    const nextUntrackedEmails: ParsedEmail[] = [];
+    const nextEmailJobMap: Record<string, Job> = {};
+
+    jobs.forEach(job => {
+      const key = `${job.company}-${job.title}`;
+      nextGroupedJobs[key] = { job, emails: [] };
+    });
+
+    // Generic business/tech terms to strip from token matching to avoid false positives
+    const GENERIC_COMPANIES = new Set([
+      "technology", "technologies", "medical", "corporation", "corporations", "corp", "group", "group llc",
+      "solutions", "solution", "services", "service", "systems", "system", "inc", "co", "llc", "ltd", "limited",
+      "consulting", "careers", "jobs", "staffing", "recruitment", "recruiting", "talent", "com", "net", "org",
+      "workday", "workday.com", "myworkday", "myworkdayjobs", "noreply", "no-reply",
+      "all", "access", "help", "desk", "support", "technical", "technician", "specialist", "level", "remote"
+    ]);
+    const hasWord = (text: string, word: string) => new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(text);
+
+    emails.forEach(email => {
+      let matchedJobKey: string | null = null;
+      let matchedJob: Job | null = null;
+      let highestScore = 0;
+
+    // Normalize spacing and formatting: compress newlines, tabs, and non-breaking spaces (\u00a0) into a single space
+    const fromStr = email.from.toLowerCase().replace(/[\s\u00a0]+/g, " ");
+    const subStr = email.subject.toLowerCase().replace(/[\s\u00a0]+/g, " ");
+    const bodyStr = email.bodyText.toLowerCase().replace(/[\s\u00a0]+/g, " ");
+    const snippetStr = (email.snippet || "").toLowerCase().replace(/[\s\u00a0]+/g, " ");
+    const allText = `${fromStr} ${subStr} ${bodyStr} ${snippetStr}`;
+
+    for (const job of jobs) {
+      const company = job.company.toLowerCase().trim();
+      const title = job.title.toLowerCase().trim();
+      const cleanTitle = title.replace(/\b(job post|- job post)\b/gi, "").trim();
+
+      // Extract core unique brand word. For "Mercer Bucks Technology", it yields "mercer bucks"
+      // For "Zoll Medical Corporation", it yields "zoll"
+      const coreBrand = company
+        .replace(/\b(technology|technologies|medical|corporation|corp|inc|llc|ltd|limited|group|solutions|services|systems|care)\b/gi, "")
+        .replace(/[^a-z0-9\s]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      const brandWords = coreBrand
+        .split(/\s+/)
+        .filter(w => w.length >= 4 && !GENERIC_COMPANIES.has(w));
+
+      let score = 0;
+      let matchedSpecificToken = false;
+      let strongCompanyEvidence = false;
+
+      // 1. Core Brand Phrase match in prominent fields (Huge Score)
+      if (coreBrand.length > 2) {
+        if (fromStr.includes(coreBrand) || subStr.includes(coreBrand)) {
+          score += 50;
+          matchedSpecificToken = true;
+          strongCompanyEvidence = true;
+        } else if (bodyStr.includes(coreBrand) || snippetStr.includes(coreBrand)) {
+          score += 30;
+          matchedSpecificToken = true;
+          strongCompanyEvidence = true;
+        }
+      }
+
+      // 2. Individual non-generic token check (No Alex Mercer constraints apply)
+      let bodyBrandWordMatches = 0;
+      let uniqueBodyBrandMatch = false;
+      brandWords.forEach(word => {
+        if (hasWord(fromStr, word)) {
+          score += 25;
+          matchedSpecificToken = true;
+          strongCompanyEvidence = true;
+        } else if (hasWord(subStr, word)) {
+          score += 20;
+          matchedSpecificToken = true;
+          strongCompanyEvidence = true;
+        } else if (hasWord(bodyStr, word) || hasWord(snippetStr, word)) {
+          score += 15;
+          matchedSpecificToken = true;
+          bodyBrandWordMatches += 1;
+          if (word.length >= 6) uniqueBodyBrandMatch = true;
+        }
+      });
+      if (bodyBrandWordMatches >= 2) strongCompanyEvidence = true;
+      if (uniqueBodyBrandMatch) {
+        score += 15;
+        strongCompanyEvidence = true;
+      }
+
+      // 3. Exact matching overrides for known companies
+      if (company.includes("zoll") && (fromStr.includes("zoll") || subStr.includes("zoll") || bodyStr.includes("zoll") || snippetStr.includes("zoll"))) {
+        score += 35;
+        matchedSpecificToken = true;
+        strongCompanyEvidence = true;
+      }
+      if (company.includes("mercer") && (fromStr.includes("mercer") || subStr.includes("mercer") || bodyStr.includes("mercer") || snippetStr.includes("mercer"))) {
+        score += 35;
+        matchedSpecificToken = true;
+        strongCompanyEvidence = true;
+      }
+
+      // 4. Role keywords (Only adds positive reinforcement if we already have a strong company brand signal)
+      if (matchedSpecificToken && score >= 20) {
+        // Clean titles of "job post" noise
+        if (subStr.includes(cleanTitle)) {
+          score += 15;
+        } else if (bodyStr.includes(cleanTitle) || snippetStr.includes(cleanTitle)) {
+          score += 5;
+        }
+
+        const titleWords = cleanTitle
+          .replace(/[^a-z0-9\s]/g, " ")
+          .split(/\s+/)
+          .filter(w => w.length > 3 && !GENERIC_COMPANIES.has(w));
+
+        for (const token of titleWords) {
+          if (subStr.includes(token)) score += 4;
+          else if (bodyStr.includes(token) || snippetStr.includes(token)) score += 2;
+        }
+      }
+
+      if (matchedSpecificToken && strongCompanyEvidence && score > highestScore) {
+        highestScore = score;
+        matchedJobKey = `${job.company}-${job.title}`;
+        matchedJob = job;
+      }
+    }
+
+    // High threshold of 20 verifies that words like "technology" or "medical" alone inside body/subject yield 0 score
+      if (matchedJobKey && highestScore >= 30 && matchedJob) {
+        nextGroupedJobs[matchedJobKey].emails.push(email);
+        nextEmailJobMap[email.id] = matchedJob;
+      } else {
+        nextUntrackedEmails.push(email);
+      }
+    });
+
+    return {
+      groupedJobs: nextGroupedJobs,
+      untrackedEmails: nextUntrackedEmails,
+      emailJobMap: nextEmailJobMap,
+    };
+  }, [jobs, emails]);
 
   if (needsAuth) {
     return (
       <div className="flex-1 bg-faction-panel rounded border border-faction-border shadow-xl flex flex-col items-center justify-center p-8">
         <Mail className="w-14 h-14 text-slate-700 mb-4 animate-pulse" />
-        <h2 className="text-sm font-bold font-mono uppercase tracking-widest text-[#e6edf3] mb-2">Connect your Gmail Inbox</h2>
+        <h2 className="text-sm font-bold font-mono uppercase tracking-widest text-faction-text mb-2">Connect Google Workspace</h2>
         <p className="text-xs font-mono text-slate-400 max-w-sm text-center mb-6 leading-relaxed">
-          Link to your Google account to live-monitor matching recruiter communications in real-time. We only query and trace work-related email matches.
+          Sign in directly with Google OAuth to monitor matching Gmail recruiter communications. Firebase is not used.
         </p>
+        <input
+          type="text"
+          value={googleClientId}
+          onChange={(e) => {
+            setGoogleClientId(e.target.value);
+            localStorage.setItem("jobflow_google_client_id", e.target.value.trim());
+          }}
+          placeholder="Google OAuth Client ID (.apps.googleusercontent.com)"
+          className="w-full max-w-md mb-3 px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
         <button
           onClick={onLogin}
-          disabled={isLoggingIn}
-          className="px-4 py-2 bg-white border border-slate-300 rounded shadow-md hover:shadow-lg hover:bg-slate-50 flex items-center gap-2.5 cursor-pointer font-sans text-xs font-bold disabled:opacity-50 mb-5 transition-all text-slate-800 active:scale-98"
+          disabled={isLoggingIn || !googleClientId.trim()}
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded shadow-md flex items-center gap-2.5 cursor-pointer font-sans text-xs font-bold disabled:opacity-50 mb-5 transition-all text-white active:scale-98"
         >
-          <div className="w-4 h-4 flex items-center justify-center">
-            <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-full h-full">
-              <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
-              <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
-              <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
-              <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
-              <path fill="none" d="M0 0h48v48H0z"></path>
-            </svg>
-          </div>
-          <span className="text-slate-700">{isLoggingIn ? "Sign In Sequence..." : "Sign in with Google"}</span>
+          <Mail className="w-4 h-4" />
+          <span>{isLoggingIn ? "Connecting..." : "Sign in with Google OAuth"}</span>
         </button>
 
         <div className="mt-6 border-t border-faction-border pt-5 w-full max-w-xs text-center">
@@ -155,21 +308,21 @@ export default function EmailMonitor({
   }
 
   const renderEmailList = (emailList: ParsedEmail[]) => {
-    // Filter out our locally deleted / hidden items
-    const visibleList = emailList.filter(email => !hiddenEmailIds.includes(email.id));
+    // Keep matched messages visible even if they were previously auto-hidden while unmatched.
+    const visibleList = emailList.filter(email => emailJobMap[email.id] || !hiddenEmailIds.includes(email.id));
 
     if (visibleList.length === 0) {
       return (
-        <div className="text-center py-12 text-slate-500 p-6 bg-black/30 rounded border border-dashed border-faction-border shadow-inner">
-          <MailOpen className="w-8 h-8 mx-auto text-slate-700 mb-2.5" />
-          <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider font-mono">Workspace Inbox Clean</h4>
+        <div className="text-center py-12 text-slate-500 p-6 bg-slate-50 rounded border border-dashed border-slate-300 shadow-inner">
+          <MailOpen className="w-8 h-8 mx-auto text-slate-400 mb-2.5" />
+          <h4 className="text-[10px] font-bold text-slate-800 uppercase tracking-wider font-mono">Workspace Inbox Clean</h4>
           <p className="text-[9px] max-w-xs mx-auto mt-1 text-slate-500 leading-normal font-mono">
             No active communications matched. Hidden or deleted emails are persistently shelved from your tracking feed.
           </p>
         </div>
       );
     }
-    
+
     return visibleList.map(email => {
       const matchedJob = emailJobMap[email.id];
       const gmailLink = `https://mail.google.com/mail/u/0/#inbox/${email.threadId || email.id}`;
@@ -178,7 +331,7 @@ export default function EmailMonitor({
           {/* Delete Button on Left */}
           <button
             onClick={() => onDeleteEmail(email.id)}
-            title="Delete from Sight"
+            title="Hide locally only. This no longer moves Gmail messages to Trash."
             className="p-1 text-slate-500 hover:text-rose-450 hover:bg-rose-950/20 rounded cursor-pointer transition-colors shrink-0 mt-0.5"
           >
             <Trash2 className="w-3.5 h-3.5" />
@@ -198,7 +351,7 @@ export default function EmailMonitor({
                     </span>
                   )}
                 </div>
-                <h4 className="text-[11.5px] font-bold font-mono text-slate-200 leading-snug">{email.subject || '(No Subject)'}</h4>
+                <h4 className="text-[11.5px] font-bold font-mono text-slate-900 leading-snug">{email.subject || '(No Subject)'}</h4>
               </div>
 
               {/* Clickable Deep Link to Gmail */}
@@ -214,12 +367,12 @@ export default function EmailMonitor({
             </div>
 
             <div className="flex items-center gap-1.5 mt-1 text-[10px] text-slate-500 font-mono">
-              <span className="text-slate-400 truncate max-w-sm">From: {email.from}</span>
-              <span className="text-slate-700 font-bold">•</span>
-              <span className="text-slate-550">{new Date(email.date).toLocaleString()}</span>
+              <span className="text-slate-600 truncate max-w-sm">From: {email.from}</span>
+              <span className="text-slate-400 font-bold">•</span>
+              <span className="text-slate-600">{new Date(email.date).toLocaleString()}</span>
             </div>
-            
-            <div className="mt-2 text-[10px] text-faction-text bg-black/40 p-2.5 rounded border border-faction-border max-h-48 overflow-y-auto whitespace-pre-wrap font-mono leading-relaxed select-text">
+
+            <div className="mt-2 text-[10px] text-slate-800 bg-slate-50 p-2.5 rounded border border-slate-200 max-h-48 overflow-y-auto whitespace-pre-wrap font-mono leading-relaxed select-text">
               {email.bodyText.trim() === "" ? <span className="italic text-slate-600">Message content empty or not parseable from plain text.</span> : email.bodyText}
             </div>
           </div>
@@ -229,7 +382,7 @@ export default function EmailMonitor({
   };
 
   const getVisibleEmailsCount = (emailList: ParsedEmail[]) => {
-    return emailList.filter(email => !hiddenEmailIds.includes(email.id)).length;
+    return emailList.filter(email => emailJobMap[email.id] || !hiddenEmailIds.includes(email.id)).length;
   };
 
   const getSelectedEmails = () => {
@@ -240,32 +393,24 @@ export default function EmailMonitor({
   };
 
   const visibleEmailsCount = getVisibleEmailsCount(emails);
-  const visibleUntrackedCount = getVisibleEmailsCount(untrackedEmails);
-
-  return (
-    <div className="flex-1 flex flex-col gap-2 overflow-hidden" id="email-monitor-workspace">
-      {!isDemoMode && user && (
-        <p className="text-[9px] font-mono text-emerald-400/90 bg-emerald-950/20 border border-emerald-900/30 rounded px-2.5 py-1.5 shrink-0">
-          Matched job emails are saved to Gmail label <strong>{JOBFLOW_GMAIL_LABEL_NAME}</strong> so future syncs remember them.
-        </p>
-      )}
-      <div className="flex-1 flex flex-col lg:flex-row gap-4 overflow-hidden min-h-0">
+  const visibleUntrackedCount = getVisibleEmailsCount(untrackedEmails);  return (
+    <div className="flex-1 flex flex-col lg:flex-row gap-4 overflow-hidden" id="email-monitor-workspace">
       {/* Sidebar: Grouped Categories with cohesive structural blocks */}
       <div className="w-full lg:w-64 flex flex-col bg-faction-panel border border-faction-border rounded overflow-hidden shrink-0 shadow-lg">
         <div className="p-3 border-b border-faction-border bg-faction-panel-header/80 flex items-center justify-between">
           <h2 className="text-[10px] font-black font-mono uppercase tracking-widest text-faction-text flex items-center gap-2">
             <Mail className="w-4 h-4 text-blue-400" /> Tracking Hub
           </h2>
-          <button 
+          <button
             onClick={onRefreshEmails}
             disabled={isLoadingEmails}
-            className="p-1.5 text-slate-400 hover:text-blue-450 hover:bg-slate-900 rounded cursor-pointer disabled:opacity-50 transition-colors"
+            className="p-1.5 text-slate-600 hover:text-blue-700 hover:bg-blue-50 rounded cursor-pointer disabled:opacity-50 transition-colors"
             title="Reload Inbox Feed"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLoadingEmails ? 'animate-spin' : ''}`} />
           </button>
         </div>
-        
+
         <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
           {/* SECTION 1: GLOBAL FEEDS */}
           <div>
@@ -273,7 +418,7 @@ export default function EmailMonitor({
             <div className="space-y-1">
               <button
                 onClick={() => onSelectCompanyJob("all")}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded text-left cursor-pointer transition-colors border ${selectedCompanyJob === "all" ? 'bg-faction-primary text-faction-text border-faction-accent-border/40 font-bold' : 'border-transparent hover:bg-black/10 text-faction-text-muted'}`}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded text-left cursor-pointer transition-colors border ${selectedCompanyJob === "all" ? 'bg-blue-50 text-blue-900 border-blue-200 font-bold' : 'border-transparent hover:bg-slate-50 text-slate-600'}`}
               >
                 <div className="flex items-center gap-2">
                   <Inbox className={`w-3.5 h-3.5 ${selectedCompanyJob === "all" ? 'text-blue-400' : 'text-slate-600'}`} />
@@ -288,7 +433,7 @@ export default function EmailMonitor({
 
               <button
                 onClick={() => onSelectCompanyJob("untracked")}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded text-left cursor-pointer transition-colors border ${selectedCompanyJob === "untracked" ? 'bg-faction-primary text-faction-text border-faction-accent-border/40 font-bold' : 'border-transparent hover:bg-black/10 text-faction-text-muted'}`}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded text-left cursor-pointer transition-colors border ${selectedCompanyJob === "untracked" ? 'bg-blue-50 text-blue-900 border-blue-200 font-bold' : 'border-transparent hover:bg-slate-50 text-slate-600'}`}
               >
                 <div className="flex items-center gap-2">
                   <Filter className={`w-3.5 h-3.5 ${selectedCompanyJob === "untracked" ? 'text-blue-400' : 'text-slate-600'}`} />
@@ -319,7 +464,7 @@ export default function EmailMonitor({
                     <div
                       key={key}
                       onClick={() => onSelectCompanyJob(key)}
-                      className={`group w-full flex items-center justify-between px-2.5 py-1.5 rounded text-left cursor-pointer transition-colors border ${isSelected ? 'bg-faction-primary text-faction-text border-faction-accent-border/40' : 'border-transparent hover:bg-black/10 text-faction-text-muted'}`}
+                      className={`group w-full flex items-center justify-between px-2.5 py-1.5 rounded text-left cursor-pointer transition-colors border ${isSelected ? 'bg-blue-50 text-blue-900 border-blue-200' : 'border-transparent hover:bg-slate-50 text-slate-600'}`}
                     >
                       <div className="flex-1 overflow-hidden pr-1">
                         <div className="text-[11px] font-bold font-mono truncate leading-tight">{group.job.company}</div>
@@ -346,10 +491,10 @@ export default function EmailMonitor({
             </div>
           </div>
         </div>
-        
+
         {/* Sync Mode Control Block */}
-        <div className="p-3 border-t border-faction-border bg-black/20 flex flex-col gap-2 shrink-0 font-mono">
-          <div className="flex justify-between items-center text-[9px] font-black uppercase tracking-wider text-slate-505 select-none">
+        <div className="p-3 border-t border-faction-border bg-slate-50 flex flex-col gap-2 shrink-0 font-mono">
+          <div className="flex justify-between items-center text-[9px] font-black uppercase tracking-wider text-slate-600 select-none">
             <span>Automation Feed</span>
             {isSyncActive ? (
               <span className="text-[8px] text-emerald-400 bg-emerald-950/40 border border-emerald-900/50 px-1 py-0.5 rounded uppercase font-black tracking-widest animate-pulse flex items-center gap-1">
@@ -370,7 +515,7 @@ export default function EmailMonitor({
                 ? "bg-amber-950/20 hover:bg-amber-950/40 text-amber-400 border-amber-900/40"
                 : "bg-blue-950/20 hover:bg-blue-950/40 text-blue-400 border-blue-900/40"
             }`}
-             title={isSyncActive ? "Pause active mail polling" : "Resume active 8s polling and trash sweepers"}
+             title={isSyncActive ? "Pause active mail polling" : "Resume active 20s polling and faster feed cleanup"}
           >
             {isSyncActive ? (
               <>⏸ Pause & Hold Feed</>
@@ -386,8 +531,8 @@ export default function EmailMonitor({
               <span className="text-amber-500 font-bold flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-505 animate-pulse" /> SIMULATOR ACTIVE
               </span>
-              <button 
-                onClick={onLogout} 
+              <button
+                onClick={onLogout}
                 className="text-slate-450 hover:text-rose-400 cursor-pointer underline font-bold transition-colors"
               >
                 Exit Sandbox
@@ -395,8 +540,8 @@ export default function EmailMonitor({
             </>
           ) : (
             <>
-              <span className="truncate max-w-[120px] font-semibold text-slate-300">{user?.email}</span>
-              <button onClick={onLogout} className="text-slate-450 hover:text-rose-450 cursor-pointer underline font-bold transition-colors">Log out</button>
+              <span className="truncate max-w-[120px] font-semibold text-slate-700">{user?.email}</span>
+              <button onClick={onLogout} className="text-slate-600 hover:text-rose-700 cursor-pointer underline font-bold transition-colors">Log out</button>
             </>
           )}
         </div>
@@ -406,7 +551,7 @@ export default function EmailMonitor({
           <div className="flex flex-col h-full">
             <div className="p-3 border-b border-faction-border bg-faction-panel-header/80 flex items-center justify-between shrink-0 font-mono">
               <div className="flex flex-col gap-1 pr-4">
-                <h3 className="text-[11px] font-bold text-slate-200 uppercase tracking-wider leading-none">
+                <h3 className="text-[11px] font-bold text-slate-900 uppercase tracking-wider leading-none">
                   {selectedCompanyJob === "all" ? "1:1 Google Workspace Feed" : selectedCompanyJob === "untracked" ? "Uncategorized Work Emails" : selectedCompanyJob.replace('-', ' - ')}
                 </h3>
                 <p className="text-[9.5px] text-slate-500 leading-normal mt-1">
@@ -420,10 +565,10 @@ export default function EmailMonitor({
                     value={groupedJobs[selectedCompanyJob].job.status}
                     onChange={(e) => onUpdateJobStatus(groupedJobs[selectedCompanyJob].job.id, e.target.value as any)}
                     className={`px-2 py-1 rounded text-[10px] font-mono outline-none cursor-pointer border shadow transition-colors ${
-                      groupedJobs[selectedCompanyJob].job.status === "submitted" ? "bg-slate-900 text-slate-350 border-slate-800" :
+                      groupedJobs[selectedCompanyJob].job.status === "submitted" ? "bg-slate-900 text-white border-slate-800" :
                       groupedJobs[selectedCompanyJob].job.status === "denied" ? "bg-rose-950/40 text-rose-400 border-rose-900/30" :
                       groupedJobs[selectedCompanyJob].job.status === "interviewing" ? "bg-blue-950/40 text-blue-400 border-blue-900/30" :
-                      "bg-slate-950/20 text-[#e6edf3] border-slate-800"
+                      "bg-white text-slate-900 border-slate-300"
                     }`}
                   >
                     <option value="captured">Captured</option>
@@ -436,11 +581,11 @@ export default function EmailMonitor({
                 </div>
               )}
             </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-black/10">
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50">
               {isLoadingEmails ? (
                 <div className="flex flex-col justify-center items-center h-full text-slate-500 gap-2.5 py-12 font-mono">
                   <RefreshCw className="w-5 h-5 animate-spin text-blue-400" />
-                  <p className="text-[10px] font-bold text-slate-400">Syncing live workspace details...</p>
+                  <p className="text-[10px] font-bold text-slate-700">Syncing live workspace details...</p>
                   <p className="text-[9px] text-slate-500">Performing fast parallel checks with official Google servers</p>
                 </div>
               ) : (
@@ -449,15 +594,14 @@ export default function EmailMonitor({
             </div>
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center h-full text-center p-8 text-slate-505 font-mono">
-            <Inbox className="w-10 h-10 text-slate-700 mb-2.5" />
-            <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Select a Pipeline Filter</h3>
+          <div className="flex flex-col items-center justify-center h-full text-center p-8 text-slate-600 font-mono">
+            <Inbox className="w-10 h-10 text-slate-400 mb-2.5" />
+            <h3 className="text-[11px] font-bold text-slate-800 uppercase tracking-wider">Select a Pipeline Filter</h3>
             <p className="text-[10px] text-slate-500 mt-1 max-w-sm leading-relaxed">
               Click any matching active pipeline or view global feeds from the tracking panel to inspect recent email statuses.
             </p>
           </div>
         )}
-      </div>
       </div>
     </div>
   );

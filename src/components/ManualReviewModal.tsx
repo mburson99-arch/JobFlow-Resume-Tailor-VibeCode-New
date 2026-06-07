@@ -23,7 +23,7 @@ export default function ManualReviewModal({
   useEffect(() => {
     if (job) {
       setPitchText(
-        `Dear Hiring Team,\n\nI am writing to express my interest in the ${job.title} role at ${job.company}. My background aligns with the support, troubleshooting, documentation, and customer service needs described in the posting.\n\nThank you for your time and consideration.\n\nWarm regards,\n${profile?.name || "Michael Burson"}`
+        `Dear Hiring Division,\n\nI am writing to express my eager interest in the ${job.title} vacancy at ${job.company}. My professional background aligns closely with the core frameworks and optimization metrics required for this specific role.\n\nThank you for inspecting my tailored credentials, and I anticipate establishing next coordination contact.\n\nWarm regards,\n${profile?.name || "Michael Burson"}`
       );
       // Reset checkboxes
       setCheckedResumeFile(job.status === "submitted");
@@ -83,7 +83,7 @@ export default function ManualReviewModal({
             </div>
             {job.matchScore && (
               <div className="mt-3 pt-3 border-t border-slate-200 flex items-center justify-between text-[11px]">
-                  <span className="text-slate-500">Resume Match Rating:</span>
+                <span className="text-slate-500">Gemini ATS Compatibility Rating:</span>
                 <span className="font-bold text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded">
                   {job.matchScore}% Match
                 </span>
@@ -133,8 +133,8 @@ export default function ManualReviewModal({
                   className="mt-0.5 rounded cursor-pointer text-blue-600"
                 />
                 <div className="text-[11px]">
-                  <span className="font-bold text-slate-800 block">Review notes addressed</span>
-                  <p className="text-slate-500 mt-0.5">Confirm the resume is honest, readable, and aligned with the job posting.</p>
+                  <span className="font-bold text-slate-800 block">Brutal critiqued nits corrected</span>
+                  <p className="text-slate-500 mt-0.5">Acknowledge any Gemini nitpicks (passive verbs, student vibes) are fully answered.</p>
                 </div>
               </label>
             </div>

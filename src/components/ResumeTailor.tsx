@@ -3,15 +3,15 @@ import { Job, CandidateProfile } from "../types";
 import { Sparkles, Terminal, FileText, ArrowRight, Save, RotateCcw, AlertTriangle, Check, ChevronRight, HelpCircle, Eye, Printer, Download } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
-import { downloadResumePdf } from "../lib/downloadResumePdf";
-import { EXPERT_POLISH_PROMPT } from "../lib/resumePrompts";
+// @ts-ignore
+import html2pdf from "html2pdf.js";
 
 interface ResumeTailorProps {
   selectedJob: Job | null;
   jobs: Job[];
   profile: CandidateProfile;
   onUpdateProfile: (profile: CandidateProfile) => void;
-  onTailoringComplete: () => void;
+  onTailoringComplete: (updatedJob?: Job) => void;
   onStatusUpdate: (jobId: string, status: 'captured' | 'analyzing' | 'tailored' | 'manual_review' | 'submitted') => void;
 }
 
@@ -40,12 +40,13 @@ export default function ResumeTailor({
   
   const [isEditingResume, setIsEditingResume] = useState(false);
   const resumePrintRef = useRef<HTMLDivElement>(null);
+  const activeTargetJobs = jobs.filter((job) => job.status !== "submitted");
 
   useEffect(() => {
-    if (initialSelectedJob) {
+    if (initialSelectedJob && !isTailoring) {
       setSelectedJob(initialSelectedJob);
     }
-  }, [initialSelectedJob]);
+  }, [initialSelectedJob, isTailoring]);
 
   useEffect(() => {
     if (selectedJob) {
@@ -55,7 +56,7 @@ export default function ResumeTailor({
         setTailoredResumeText(selectedJob.tailoredResumeText || "");
         setMatchScore(selectedJob.matchScore || 0);
         setAiResponseText(selectedJob.aiResponse || "");
-        setActiveTab("critique");
+        setActiveTab((current) => current === "tailored" ? "tailored" : "critique");
       } else {
         setCritiqueMarkdown("");
         setTailoredResumeText("");
@@ -90,9 +91,11 @@ export default function ResumeTailor({
     setErrorMsg("");
     setIsTailoring(true);
     setAiResponseText("");
+    const previousStatus = selectedJob.status;
     onStatusUpdate(selectedJob.id, "analyzing");
 
     const instructionToSend = typeof overrideInstruction === "string" ? overrideInstruction : customInstructions;
+    const isDraftRefinement = Boolean(tailoredResumeText && instructionToSend.trim());
 
     try {
       const response = await fetch("/api/resume/tailor", {
@@ -119,15 +122,27 @@ export default function ResumeTailor({
       setAiResponseText(data.aiResponse || "");
       setCustomInstructions("");
 
-      // Inform parent
-      onTailoringComplete();
+      const updatedJob: Job = {
+        ...selectedJob,
+        status: "tailored",
+        matchScore: data.matchScore,
+        originalResume: resumeText,
+        tailoredResumeText: data.tailoredResume,
+        critiqueMarkdown: data.brutallyHonestCritique,
+        requiresRelocation: data.requiresRelocation,
+        aiResponse: data.aiResponse || "",
+      };
+      setSelectedJob(updatedJob);
+
+      // Inform parent with the fresh draft so future refinements use the newest resume.
+      onTailoringComplete(updatedJob);
       setIsTailoring(false);
-      setActiveTab("critique");
+      setActiveTab(isDraftRefinement ? "tailored" : "critique");
     } catch (err: any) {
       console.error(err);
       setErrorMsg(err.message || "Something went wrong during the Gemini AI call. Please ensure your API key matches setting presets.");
       setIsTailoring(false);
-      onStatusUpdate(selectedJob.id, "captured");
+      onStatusUpdate(selectedJob.id, previousStatus);
     }
   };
 
@@ -148,7 +163,16 @@ export default function ResumeTailor({
        return;
     }
 
-    downloadResumePdf(printNode, { company: selectedJob?.company }).catch((err: any) => {
+    const opt = {
+      margin:       15,
+      filename:     `Tailored_Resume_${selectedJob?.company || "employer"}.pdf`,
+      image:        { type: 'jpeg' as const, quality: 0.98 },
+      html2canvas:  { scale: 2, useCORS: true },
+      jsPDF:        { unit: 'mm', format: 'letter', orientation: 'portrait' as const },
+      pagebreak:    { mode: ['css', 'legacy'] }
+    };
+
+    html2pdf().set(opt).from(printNode).save().catch((err: any) => {
       console.error("PDF generation failed:", err);
       setErrorMsg("Failed to generate PDF automatically.");
     });
@@ -160,31 +184,61 @@ export default function ResumeTailor({
       return;
     }
     
-    await handleTailorCall(EXPERT_POLISH_PROMPT);
+    const prompt = `You are an expert resume editor and professional writing coach. Your task is to humanize and refine the provided resume draft.
+
+Please do the following:
+
+1. Rewrite overly formal or robotic-sounding language into natural, confident, first-person professional tone that reflects a real person's voice.
+
+2. Remove or rephrase AI-generated patterns, including:
+- Overused buzzwords such as "leverage", "spearhead", "utilize", "dynamic", and "results-driven"
+- Generic filler phrases that add no real value
+- Repetitive sentence structures or bullet point formats
+- Exaggerated superlatives or vague claims
+
+3. Add personality and authenticity by ensuring the language sounds like it was written by the candidate themselves: confident, grounded, and genuine.
+
+4. Preserve all factual content. Do not invent, add, or remove any job titles, dates, companies, accomplishments, skills, contact details, certifications, tools, or metrics.
+
+5. Maintain professional formatting standards appropriate for the candidate's industry.
+
+6. Enforce resume length: the polished resume should read like a complete 1.5 to 2.5 page resume. Do not cut it down into a short one-page summary. Preserve enough concrete detail from the current draft to stay at least about 1.5 pages, while keeping it concise enough to stay under about 2.5 pages.
+
+7. If the draft is too short, expand by restoring truthful existing detail from the current resume draft and base resume context. If the draft is too long, tighten wording without deleting real roles, projects, certifications, or useful job-aligned bullets.
+
+Additional JobFlow formatting rules:
+- Keep section headers clean Markdown: # Name, ## PROFESSIONAL SUMMARY, ## TECHNICAL SKILLS, ## TECHNICAL PROJECTS, ## PROFESSIONAL EXPERIENCE, ## EDUCATION & CERTIFICATIONS.
+- Format job title/company/date lines as level-three headings, like "### Operations & Logistics Coordinator | Company | Location | 2020 - Present". The app will bold and underline those job title/location lines only.
+- Never put a bullet/star/asterisk before job titles, company lines, date lines, or section headings.
+- Use plain hyphen bullets only for actual resume points, like "- Remote Support: resolved customer-facing issues...".
+- Do not use asterisk bullets or Markdown bold markers such as "**Remote Support:**". Do not bold, underline, or highlight bullet key-point labels.
+- Return the fully revised resume, ready for submission, in the tailoredResume field only. Do not put commentary, analysis, or explanations inside the resume.`;
+
+    await handleTailorCall(prompt);
   };
   return (
     <div className="flex-1 flex flex-col gap-3.5 overflow-hidden" id="resume-tailoring-module">
-      <div className="bg-faction-panel border border-faction-border rounded shadow-xl p-3 flex flex-col shrink-0">
+      <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-3 flex flex-col shrink-0">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-faction-accent/15 rounded flex items-center justify-center text-faction-accent">
-              <Sparkles className="w-5 h-5 animate-pulse" />
+            <div className="w-9 h-9 bg-blue-50 rounded-lg flex items-center justify-center text-blue-600 border border-blue-100">
+              <Sparkles className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-xs font-black uppercase font-mono tracking-wider text-slate-200">Resume Tailoring Workspace</h2>
-              <p className="text-[10px] text-slate-450 font-mono">Compare the role, revise the resume, and review the output before applying.</p>
+              <h2 className="text-sm font-bold text-slate-950">AI Resume Tailoring Workstation</h2>
+              <p className="text-xs text-slate-600">Auto-craft focused resume modifications based on frank industry criticism</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[11px] text-slate-400 font-bold font-mono uppercase tracking-wider">Active Target Listing:</span>
+            <span className="text-xs text-slate-700 font-semibold">Active target listing:</span>
             <select
               onChange={handleJobSelect}
               value={selectedJob?.id || ""}
-              className="text-xs p-1.5 bg-faction-bg border border-faction-border rounded font-bold text-faction-text focus:outline-none focus:ring-1 focus:ring-faction-accent cursor-pointer"
+              className="text-xs p-2 bg-white border border-slate-300 rounded-lg font-semibold text-slate-950 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
               id="job-select-tailor"
             >
               <option value="">-- Choose Captured Role --</option>
-              {jobs.map((j) => (
+              {activeTargetJobs.map((j) => (
                 <option key={j.id} value={j.id}>
                   {j.company} - {j.title} ({j.status.toUpperCase()})
                 </option>
@@ -195,31 +249,32 @@ export default function ResumeTailor({
       </div>
 
       {!selectedJob ? (
-        <div className="flex-1 bg-faction-panel border border-faction-border rounded flex flex-col items-center justify-center p-8 text-center shadow-xl" id="no-job-selected-view">
-          <FileText className="w-12 h-12 text-slate-700 mb-2 animate-bounce" />
-          <p className="text-xs font-bold font-mono uppercase text-slate-400 tracking-widest">No Job Selected to Tailor</p>
+        <div className="flex-1 bg-white border border-slate-200 rounded-xl flex flex-col items-center justify-center p-8 text-center shadow-sm" id="no-job-selected-view">
+          <FileText className="w-12 h-12 text-slate-400 mb-2" />
+          <p className="text-sm font-bold text-slate-900">No Job Selected to Tailor</p>
           <p className="text-[11px] text-slate-500 max-w-sm mt-1">
-            Pick an existing captured or scraped job role using the dropdown selector above.
+            Pick an existing captured or scraped job role using the dropdown selector above to feed into the Gemini critique compiler system.
           </p>
         </div>
       ) : (
         <div className="flex-1 flex flex-col md:flex-row gap-4 overflow-hidden" id="tailor-workspace-columns">
           {/* Left Column: Input Data */}
-          <div className="flex-1 bg-faction-panel border border-faction-border rounded flex flex-col overflow-hidden shadow-xl" id="inputs-column">
-            <div className="bg-faction-panel-header/80 p-2.5 border-b border-faction-border flex items-center justify-between shrink-0">
-              <span className="text-[10px] font-bold font-mono text-faction-text-muted uppercase tracking-widest">Candidate & Job Specifications</span>              <button
+          <div className="flex-1 bg-white border border-slate-200 rounded-xl flex flex-col overflow-hidden shadow-sm" id="inputs-column">
+            <div className="bg-slate-50 p-3 border-b border-slate-200 flex items-center justify-between shrink-0">
+              <span className="text-xs font-bold text-slate-900">Candidate & Job Specifications</span>
+              <button
                 onClick={saveProfileUpdates}
-                className="text-[9.5px] bg-black/20 hover:bg-black/45 border border-faction-border text-faction-text px-2.5 py-1 rounded cursor-pointer flex items-center gap-1 font-mono font-bold transition-all"
+                className="text-xs bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 px-3 py-1.5 rounded-lg cursor-pointer flex items-center gap-1.5 font-semibold transition-all shadow-sm"
                 title="Save updates to basic candidate resume text"
               >
-                <Save className="w-3.5 h-3.5 text-blue-400" /> SAVE BASE RESUME
+                <Save className="w-3.5 h-3.5 text-blue-600" /> Save Base Resume
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-black/10" id="inputs-scroller">
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50" id="inputs-scroller">
               <div>
-                <div className="flex justify-between items-center mb-1 flex-wrap gap-1.5 font-mono">
-                  <label className="block text-[10px] font-bold text-slate-450 uppercase">Your Base Resume Template (Raw Text)</label>
+                <div className="flex justify-between items-center mb-1.5 flex-wrap gap-1.5">
+                  <label className="block text-xs font-bold text-slate-800">Your Base Resume Template</label>
                   <button
                     type="button"
                     onClick={() => {
@@ -227,7 +282,7 @@ export default function ResumeTailor({
                         setResumeText(profile.resumeText || "");
                       }
                     }}
-                    className="text-[9.5px] text-blue-400 bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/20 px-2 py-0.5 rounded cursor-pointer font-bold flex items-center gap-1 shadow-xs transition-colors"
+                    className="text-xs text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2.5 py-1 rounded-lg cursor-pointer font-semibold flex items-center gap-1 shadow-xs transition-colors"
                     title="Load the persistent candidate resume text from your System Settings"
                   >
                     📂 Sync/Load Default Resume from Settings
@@ -237,56 +292,55 @@ export default function ResumeTailor({
                   value={resumeText}
                   onChange={(e) => setResumeText(e.target.value)}
                   rows={9}
-                  className="w-full text-xs p-2 bg-faction-bg border border-faction-border text-slate-100 rounded font-mono placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-faction-accent focus:border-transparent"
+                  className="w-full text-sm p-3 bg-white border border-slate-300 text-slate-950 rounded-lg font-sans placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 leading-relaxed shadow-inner"
                   placeholder="Paste your standard text resume here (include contact data, summary, skills and chronological work blocks)..."
                 />
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold font-mono text-slate-450 uppercase mb-1">Target Job Description (JD Context)</label>
+                <label className="block text-xs font-bold text-slate-800 mb-1.5">Target Job Description</label>
                 <textarea
                   value={jobDescription}
                   onChange={(e) => setJobDescription(e.target.value)}
                   rows={6}
-                  className="w-full text-xs p-2 bg-faction-bg border border-faction-border text-slate-100 rounded font-mono placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-faction-accent focus:border-transparent"
+                  className="w-full text-sm p-3 bg-white border border-slate-300 text-slate-950 rounded-lg font-sans placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 leading-relaxed shadow-inner"
                   placeholder="Paste core requirements or metadata copy-pasted directly from Indeed / Linkedin..."
                 />
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold font-mono text-blue-450 uppercase flex items-center gap-1 mb-1">
-                  <Sparkles className="w-3 h-3 text-blue-400" />
+                <label className="block text-xs font-bold text-blue-700 flex items-center gap-1 mb-1.5">
+                  <Sparkles className="w-3 h-3 text-blue-600" />
                   AI Refinement Prompt (Optional)
                 </label>
                 <textarea
                   value={customInstructions}
                   onChange={(e) => setCustomInstructions(e.target.value)}
                   rows={3}
-                  className="w-full text-xs p-2 bg-blue-950/10 border border-blue-900/30 text-blue-200 rounded font-mono placeholder-blue-900/40 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full text-sm p-3 bg-white border border-blue-200 text-slate-950 rounded-lg font-sans placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 leading-relaxed shadow-inner"
                   placeholder="E.g. Remove any mention of Python, or make the summary shorter, or focus on my customer service skills..."
                 />
               </div>
             </div>
 
-            <div className="p-3 bg-faction-panel border-t border-faction-border flex justify-between items-center shrink-0">
-              <div className="flex items-center gap-1.5 text-[10px] text-slate-450 font-mono">
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-550" />
+            <div className="p-3 bg-white border-t border-slate-200 flex justify-between items-center shrink-0">
+              <div className="flex items-center gap-1.5 text-xs text-slate-600">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
                 <span>Prepares draft matching tech stack accurately</span>
               </div>
               <button
-                type="button"
                 onClick={() => handleTailorCall()}
                 disabled={isTailoring || !resumeText || !jobDescription}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-bold flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-md transition-all animate-pulse font-mono"
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-sm transition-all"
                 id="execute-tailor-btn"
               >
                 {isTailoring ? (
                   <>
-                    <RotateCcw className="w-3.5 h-3.5 animate-spin" /> TAILORING WITH GEMINI...
+                    <RotateCcw className="w-3.5 h-3.5 animate-spin" /> Tailoring...
                   </>
                 ) : (
                   <>
-                    <Sparkles className="w-3.5 h-3.5 animate-bounce" /> COMPILE & TAILOR
+                    <Sparkles className="w-3.5 h-3.5" /> Compile & Tailor
                   </>
                 )}
               </button>
@@ -294,53 +348,52 @@ export default function ResumeTailor({
           </div>
 
           {/* Right Column: AI Output */}
-          <div className="flex-1 bg-faction-panel border border-faction-border rounded flex flex-col overflow-hidden shadow-xl" id="outputs-column">
+          <div className="flex-1 bg-white border border-slate-200 rounded-xl flex flex-col overflow-hidden shadow-sm" id="outputs-column">
             {/* Tab Switches */}
-            <div className="bg-faction-panel-header/80 border-b border-faction-border flex items-center justify-between p-1 shrink-0">
+            <div className="bg-slate-50 border-b border-slate-200 flex items-center justify-between p-2 shrink-0">
               <div className="flex gap-1.5">
                 <button
                   type="button"
                   onClick={() => setActiveTab("critique")}
                   disabled={!critiqueMarkdown}
-                  className={`text-[10px] font-bold px-3 py-1.5 rounded transition-all cursor-pointer font-mono border ${
+                  className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-all cursor-pointer border ${
                     activeTab === "critique"
-                      ? "bg-faction-primary text-faction-text border-faction-accent-border/40 font-bold"
-                      : "border-transparent hover:bg-black/10 text-faction-text-muted disabled:opacity-30 disabled:cursor-not-allowed"
+                      ? "bg-blue-600 text-white border-blue-700 shadow-sm"
+                      : "border-transparent hover:bg-white text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed"
                   }`}
                   id="tab-critique"
                 >
-                  BRUTAL CRITIQUE
+                  Critique
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab("tailored")}
                   disabled={!tailoredResumeText}
-                  className={`text-[10px] font-bold px-3 py-1.5 rounded transition-all cursor-pointer font-mono border ${
+                  className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-all cursor-pointer border ${
                     activeTab === "tailored"
-                      ? "bg-faction-primary text-faction-text border-faction-accent-border/40 font-bold"
-                      : "border-transparent hover:bg-black/10 text-faction-text-muted disabled:opacity-30 disabled:cursor-not-allowed"
+                      ? "bg-blue-600 text-white border-blue-700 shadow-sm"
+                      : "border-transparent hover:bg-white text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed"
                   }`}
                   id="tab-tailored"
                 >
-                  TAILORED PREVIEW
+                  Tailored Preview
                 </button>
               </div>
 
               <div className="flex items-center gap-2 pr-2">
                 {activeTab === "tailored" && tailoredResumeText && (
                   <button
-                    type="button"
-                    onClick={() => handleTailorCall("Remove any commentary that is not part of the resume. Restore standard Markdown section headers using '## ' and return only the resume text.")}
+                    onClick={() => handleTailorCall("FORMAT REPAIR ONLY: Rebuild the current draft into clean resume formatting. Preserve the same truthful content and contact details, but restore line breaks, blank lines, section spacing, bullet spacing, and standard headers. Use '# Name' at the top, then '## PROFESSIONAL SUMMARY', '## TECHNICAL SKILLS', '## TECHNICAL PROJECTS', '## PROFESSIONAL EXPERIENCE', and '## EDUCATION & CERTIFICATIONS' where applicable. Format job title/company/date lines as level-three headings like '### Operations & Logistics Coordinator | Company | Location | 2020 - Present'; the app will bold and underline those lines only. Use plain hyphen bullets only for actual resume points, like '- Remote Support: resolved customer-facing issues...'. Do not use asterisk bullets or Markdown bold markers like '**Label:**'. Do not bold, underline, or highlight bullet key-point labels. Do not collapse headings into paragraphs. Do not run sections together. Do not add conversational text, pleasantries, analysis, or feedback inside the resume. Return a polished resume document only.")}
                     disabled={isTailoring}
-                    className="px-2.5 py-1 bg-[#111827] hover:bg-slate-900 border border-slate-800 text-slate-300 rounded cursor-pointer flex items-center gap-1 font-bold font-mono text-[9px] transition-colors"
+                    className="px-2.5 py-1 bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 rounded-lg cursor-pointer flex items-center gap-1 font-semibold text-xs transition-colors shadow-sm"
                   >
-                    <RotateCcw className="w-3 h-3" /> {isTailoring ? "Refining..." : "RE-OPTIMIZE RESUME"}
+                    <RotateCcw className="w-3 h-3" /> {isTailoring ? "Refining..." : "Re-Optimize"}
                   </button>
                 )}
                 {matchScore !== null && (
-                  <div className="flex items-center gap-1.5 font-mono">
-                    <span className="text-[9px] font-bold text-slate-505 uppercase tracking-widest hidden sm:inline">MATCH SCALE:</span>
-                    <span className={`text-[11px] font-black px-2 py-0.5 rounded ${matchScore >= 90 ? "bg-emerald-950 text-emerald-400 border border-emerald-900/35" : "bg-amber-955 text-amber-405 border border-amber-900/35"}`}>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-semibold text-slate-600 hidden sm:inline">Match Scale:</span>
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded-lg ${matchScore >= 90 ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-amber-50 text-amber-700 border border-amber-200"}`}>
                       {matchScore}% ATS
                     </span>
                   </div>
@@ -350,87 +403,84 @@ export default function ResumeTailor({
 
             {/* Error Message Box */}
             {errorMsg && (
-              <div className="p-3 bg-rose-950/20 text-rose-450 text-xs border-b border-rose-900/35 flex items-start gap-2 shrink-0">
+              <div className="p-3 bg-rose-50 text-rose-700 text-xs border-b border-rose-200 flex items-start gap-2 shrink-0">
                 <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                <p className="font-mono font-semibold">{errorMsg}</p>
+                <p className="font-semibold">{errorMsg}</p>
               </div>
             )}
             
             {/* Relocation Warning Box */}
             {selectedJob?.requiresRelocation && (
-              <div className="p-3 bg-blue-950/10 text-blue-450 text-xs border-b border-blue-900/30 flex items-start gap-2 shrink-0">
+              <div className="p-3 bg-blue-50 text-blue-700 text-xs border-b border-blue-200 flex items-start gap-2 shrink-0">
                 <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                <p className="font-semibold text-[11px] font-mono leading-relaxed">
+                <p className="font-semibold text-[11px] leading-relaxed">
                   <strong>LOCATION WARNING:</strong> The AI noted that this job description specifically requires relocation/onsite attendance.
                 </p>
               </div>
             )}
 
             {/* Response Area */}
-            <div className="flex-1 overflow-y-auto p-4 bg-black/10" id="output-content-area font-mono">
+            <div className="flex-1 overflow-y-auto p-4 bg-slate-50" id="output-content-area">
               {isTailoring ? (
-                <div className="flex flex-col items-center justify-center h-full p-8 text-center text-slate-400">
-                  <Terminal className="w-10 h-10 text-blue-405 animate-spin mb-3" />
-                  <p className="text-xs font-bold font-mono uppercase text-slate-300">Analyzing resume and job requirements...</p>
-                  <p className="text-[10px] text-slate-500 font-mono max-w-xs mt-1">
-                    Comparing the resume against the target role and preparing a focused revision.
+                <div className="flex flex-col items-center justify-center h-full p-8 text-center text-slate-600">
+                  <Terminal className="w-10 h-10 text-blue-600 animate-spin mb-3" />
+                  <p className="text-sm font-bold text-slate-900">Invoking Gemini-Flash Analyzer Engine...</p>
+                  <p className="text-xs text-slate-600 max-w-xs mt-1">
+                    Analyzing raw resume formats against target company needs. Running brutal critique sequence and optimizing years of achievements in real-time.
                   </p>
                 </div>
               ) : activeTab === "critique" && critiqueMarkdown ? (
-                <div className="space-y-4 font-sans text-xs text-slate-350 leading-relaxed" id="critique-markdown-box">
-                  <div className="p-3.5 bg-amber-950/20 border border-amber-900/35 text-amber-200 rounded flex gap-3 shadow-sm font-mono">
-                    <AlertTriangle className="w-5 h-5 text-amber-555 shrink-0 mt-0.5 animate-pulse" />
+                <div className="space-y-4 font-sans text-sm text-slate-800 leading-relaxed" id="critique-markdown-box">
+                  <div className="p-3.5 bg-amber-50 border border-amber-200 text-amber-900 rounded-lg flex gap-3 shadow-sm">
+                    <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
                     <div>
-                      <h4 className="font-bold text-[11px] uppercase tracking-wider text-amber-300 font-mono">Recruiter Nitpick Warnings</h4>
-                      <p className="text-[10px] text-slate-400 mt-1 leading-normal font-mono">
+                      <h4 className="font-bold text-xs uppercase tracking-wider text-amber-800">Recruiter Nitpick Warnings</h4>
+                      <p className="text-xs text-slate-700 mt-1 leading-normal">
                         Read this feedback carefully to digest why standard resumes crash out during initial evaluation pipelines.
                       </p>
                     </div>
                   </div>
-                  <div className="bg-faction-bg rounded p-4 border border-faction-border shadow-md prose prose-invert max-w-none text-[11.5px] font-mono leading-relaxed text-faction-text">
+                  <div className="bg-white rounded-lg p-4 border border-slate-200 shadow-sm max-w-none text-sm leading-relaxed text-slate-900">
                     <div style={{ whiteSpace: "pre-wrap" }}>{critiqueMarkdown}</div>
                   </div>
                 </div>
               ) : activeTab === "tailored" && tailoredResumeText ? (
                 <div className="space-y-3" id="tailored-resume-viewer">
-                  <div className="flex flex-wrap items-center justify-between bg-slate-900 border border-slate-850 p-2 rounded-lg text-[10px] text-slate-300 font-mono gap-2">
+                  <div className="flex flex-wrap items-center justify-between bg-white border border-slate-200 p-2 rounded-lg text-xs text-slate-700 gap-2 shadow-sm">
                     <div className="flex items-center gap-1.5 font-bold">
-                      <Check className="w-4 h-4 text-emerald-450 animate-pulse" /> Use the formatting selectors to print or back up this document
+                      <Check className="w-4 h-4 text-emerald-600" /> Use the formatting selectors to print or back up this document
                     </div>
                     <div className="flex gap-1.5">
                       <button
-                        type="button"
                         onClick={() => setIsEditingResume(!isEditingResume)}
-                        className="px-2.5 py-1 bg-[#161f30] hover:bg-slate-850 text-slate-250 rounded border border-slate-800 cursor-pointer flex items-center gap-1 font-bold text-[9px]"
+                        className="px-2.5 py-1 bg-white hover:bg-slate-50 text-slate-800 rounded-lg border border-slate-300 cursor-pointer flex items-center gap-1 font-semibold text-xs"
                       >
-                        <Eye className="w-3.5 h-3.5" /> {isEditingResume ? "PREVIEW TYPE" : "EDIT TEXT"}
+                        <Eye className="w-3.5 h-3.5" /> {isEditingResume ? "Preview" : "Edit Text"}
                       </button>
                       <button
-                        type="button"
                         onClick={handleDownloadPDF}
-                        className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded cursor-pointer flex items-center gap-1 font-bold text-[9px]"
+                        className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer flex items-center gap-1 font-semibold text-xs"
                       >
-                        <Download className="w-3.5 h-3.5" /> EXPORT PDF
+                        <Download className="w-3.5 h-3.5" /> Export PDF
                       </button>
                       <button
-                        type="button"
                         onClick={handleExpertPolish}
                         disabled={isTailoring}
-                        className="px-2.5 py-1 bg-indigo-650/15 border border-indigo-900/40 text-indigo-400 hover:bg-indigo-600/20 rounded cursor-pointer flex items-center gap-1 font-bold text-[9px]"
+                        className="px-2.5 py-1 bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 rounded-lg cursor-pointer flex items-center gap-1 font-semibold text-xs"
                         title="Rewrite currently tailored draft into a rigorous, non-robotic Second Draft with professional help desk alignments"
                       >
-                        <Sparkles className="w-3 h-3 text-indigo-405 animate-pulse" /> POLISH COGNITIVE DRAFT
+                        <Sparkles className="w-3 h-3 text-indigo-600" /> Polish Draft
                       </button>
                     </div>
                   </div>
 
-                  <div className="bg-faction-bg rounded border border-faction-border shadow-sm p-4 text-[12px] min-h-[400px] text-faction-text font-mono select-text" id="tailored-resume-print-node-outer">
+                  <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-4 text-sm min-h-[400px] text-slate-900 font-sans select-text" id="tailored-resume-print-node-outer">
                     {isEditingResume ? (
                       <textarea
                         value={tailoredResumeText}
                         onChange={(e) => setTailoredResumeText(e.target.value)}
                         rows={18}
-                        className="w-full text-xs font-mono p-1 bg-transparent text-[#e6edf3] focus:outline-none resize-y border-0 focus:ring-0 rounded"
+                        className="w-full text-sm font-sans p-2 bg-white text-slate-950 focus:outline-none resize-y border border-slate-200 focus:ring-2 focus:ring-blue-500 rounded-lg"
                         placeholder="Edit markdown resume visually here..."
                         id="tailored-resume-edit-text"
                       />
@@ -443,43 +493,39 @@ export default function ResumeTailor({
                   
                   <div className="flex flex-col gap-2 mt-4">
                     {aiResponseText && (
-                      <div className="bg-faction-panel-header/40 rounded p-3 border border-faction-border flex gap-3 shadow-inner">
-                        <Sparkles className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
-                        <div className="text-[10px] text-slate-400 leading-normal font-medium animate-pulse">
+                      <div className="bg-blue-50 rounded-lg p-3 border border-blue-100 flex gap-3 shadow-inner">
+                        <Sparkles className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                        <div className="text-xs text-slate-700 leading-normal font-medium">
                           {aiResponseText}
                         </div>
                       </div>
                     )}
-                    <div className="bg-black/40 rounded p-2 border border-faction-border flex gap-2 items-center shadow-inner font-mono">
-                      <Sparkles className="w-4 h-4 text-blue-400 shrink-0" />
+                    <div className="bg-white rounded-lg p-2 border border-slate-200 flex gap-2 items-center shadow-inner">
+                      <Sparkles className="w-4 h-4 text-blue-600 shrink-0" />
                       <input 
                         type="text" 
                         value={customInstructions}
                         onChange={(e) => setCustomInstructions(e.target.value)}
-                        placeholder="Ask Gemini to refine (e.g. 'Make summary shorter', 'Highlight AWS')..."
-                        className="flex-1 text-xs px-2 py-1.5 border border-slate-800 rounded bg-[#0a0f1d] text-slate-200 focus:ring-1 focus:ring-blue-500 focus:outline-none placeholder-slate-605"
+                        placeholder="Ask Gemini to refine, e.g. 'Add Google Workspace to technical skills; I have used it.'"
+                        className="flex-1 text-sm px-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-950 focus:ring-2 focus:ring-blue-500 focus:outline-none placeholder-slate-400"
                         onKeyDown={(e) => {
-                           if (e.key === 'Enter') {
-                             e.preventDefault();
-                             handleTailorCall();
-                           }
+                           if (e.key === 'Enter') handleTailorCall();
                         }}
                       />
                       <button 
-                        type="button"
                         onClick={() => handleTailorCall()}
                         disabled={isTailoring || !customInstructions}
-                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-bold disabled:opacity-50 cursor-pointer shadow-md transition-colors whitespace-nowrap"
+                        className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold disabled:opacity-50 cursor-pointer shadow-sm transition-colors whitespace-nowrap"
                       >
-                        {isTailoring ? "..." : "REFINE DRAFT"}
+                        {isTailoring ? "..." : "Refine Draft"}
                       </button>
                     </div>
                   </div>
                 </div>
               ) : (
-                <div className="flex flex-col items-center justify-center h-full p-8 text-center text-slate-500 font-mono">
-                  <FileText className="w-10 h-10 text-slate-700 mb-2" />
-                  <p className="text-[10px] text-slate-450 max-w-xs leading-normal">
+                <div className="flex flex-col items-center justify-center h-full p-8 text-center text-slate-500">
+                  <FileText className="w-10 h-10 text-slate-400 mb-2" />
+                  <p className="text-xs text-slate-600 max-w-xs leading-normal">
                     Once tailored, Gemini's nitpicks and customized outputs will display here. Click "Compile & Tailor" to trigger the process.
                   </p>
                 </div>

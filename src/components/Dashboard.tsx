@@ -30,11 +30,13 @@ export default function Dashboard({
   onResetPipeline,
 }: DashboardProps) {
   const [showAddModal, setShowAddModal] = useState(false);
-  const [viewTab, setViewTab] = useState<"active" | "deleted">("active");
+  const [viewTab, setViewTab] = useState<"active" | "submitted" | "deleted">("active");
   const [newTitle, setNewTitle] = useState("");
   const [newCompany, setNewCompany] = useState("");
   const [newUrl, setNewUrl] = useState("");
   const [newDesc, setNewDesc] = useState("");
+  const submittedJobs = jobs.filter((job) => job.status === "submitted");
+  const activeJobs = jobs.filter((job) => job.status !== "submitted");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,27 +77,38 @@ export default function Dashboard({
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 border-b border-faction-border bg-faction-panel-header/90 rounded-t gap-2">
           <div className="flex items-center gap-4 flex-wrap">
             <div>
-              <h2 className="text-xs font-black uppercase font-mono tracking-wider text-slate-200">Captured Job Pipeline List</h2>
-              <p className="text-[10px] text-slate-450 font-mono mt-0.5">Scraped or created entries saved securely from Indeed and LinkedIn</p>
+              <h2 className="text-xs font-black uppercase font-mono tracking-wider text-slate-900">Captured Job Pipeline List</h2>
+              <p className="text-[10px] text-slate-600 font-mono mt-0.5">Scraped or created entries saved securely from Indeed and LinkedIn</p>
             </div>
 
             {/* Soft-Tabs Selector */}
-            <div className="flex border border-faction-border rounded p-0.5 bg-black/20 font-mono shadow-inner">
+            <div className="flex border border-slate-300 rounded p-0.5 bg-slate-100 font-mono shadow-inner">
               <button
                 onClick={() => setViewTab("active")}
                 className={`px-3 py-1 text-[10px] font-bold rounded transition-all cursor-pointer ${
                   viewTab === "active"
-                    ? "bg-faction-primary text-faction-text border border-faction-accent-border/40 shadow-xs"
+                    ? "bg-faction-primary text-white border border-faction-accent-border/40 shadow-xs"
                     : "text-faction-text-muted hover:text-faction-text font-medium"
                 }`}
               >
-                ACTIVE PIPELINE ({jobs.length})
+                ACTIVE PIPELINE ({activeJobs.length})
+              </button>
+              <button
+                onClick={() => setViewTab("submitted")}
+                className={`px-3 py-1 text-[10px] font-bold rounded transition-all cursor-pointer flex items-center gap-1 ${
+                  viewTab === "submitted"
+                    ? "bg-faction-primary text-white border border-faction-accent-border/40 shadow-xs"
+                    : "text-faction-text-muted hover:text-faction-text font-medium"
+                }`}
+                id="submitted-jobs-tab-btn"
+              >
+                SUBMITTED ({submittedJobs.length})
               </button>
               <button
                 onClick={() => setViewTab("deleted")}
                 className={`px-3 py-1 text-[10px] font-bold rounded transition-all cursor-pointer flex items-center gap-1 ${
                   viewTab === "deleted"
-                    ? "bg-faction-primary text-faction-text border border-faction-accent-border/40 shadow-xs"
+                    ? "bg-faction-primary text-white border border-faction-accent-border/40 shadow-xs"
                     : "text-faction-text-muted hover:text-faction-text font-medium"
                 }`}
                 id="deleted-jobs-tab-btn"
@@ -108,10 +121,10 @@ export default function Dashboard({
           <div className="flex gap-2 flex-wrap font-mono">
             <button
               onClick={exportCSV}
-              className="px-2.5 py-1.5 text-[10px] font-bold border border-faction-border text-faction-text rounded bg-black/20 hover:bg-black/45 cursor-pointer flex items-center gap-1.5 transition-colors"
+              className="px-2.5 py-1.5 text-[10px] font-bold border border-slate-300 text-slate-800 rounded bg-white hover:bg-slate-100 cursor-pointer flex items-center gap-1.5 transition-colors shadow-sm"
               id="export-csv-btn"
             >
-              <Download className="w-3.5 h-3.5 text-slate-500" /> EXPORT CSV
+              <Download className="w-3.5 h-3.5 text-slate-600" /> EXPORT CSV
             </button>
             <button
               onClick={() => setShowAddModal(true)}
@@ -125,21 +138,31 @@ export default function Dashboard({
 
         {/* Database Table Spreadsheet */}
         <div className="flex-1 overflow-auto min-h-[250px] scrollbar-thin scrollbar-thumb-faction-border" id="job-grid-scroller">
-          {viewTab === "active" && jobs.length === 0 ? (
+          {viewTab === "active" && activeJobs.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full p-8 text-center text-slate-500 gap-3">
-              <FileText className="w-10 h-10 text-slate-700" />
+              <FileText className="w-10 h-10 text-slate-400" />
               <div>
-                <p className="text-xs font-mono font-bold text-slate-400">PIPELINE SECURE & EMPTY</p>
+                <p className="text-xs font-mono font-bold text-slate-800">PIPELINE SECURE & EMPTY</p>
                 <p className="text-[11px] text-slate-500 max-w-sm mt-1">
-                  Install our Chromium script or use manual entry to start tracking roles locally.
+                  New, tailored, review-ready, interview, and denied roles will appear here before submission.
+                </p>
+              </div>
+            </div>
+          ) : viewTab === "submitted" && submittedJobs.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full p-8 text-center text-slate-500 gap-3">
+              <CheckCircle className="w-10 h-10 text-slate-400" />
+              <div>
+                <p className="text-xs font-mono font-bold text-slate-800">NO SUBMITTED APPLICATIONS YET</p>
+                <p className="text-[11px] text-slate-500 max-w-sm mt-1">
+                  Once a role is marked submitted, it moves here and stays scrollable separately from the active desk.
                 </p>
               </div>
             </div>
           ) : viewTab === "deleted" && deletedJobs.length === 0 ? (
             <div className="flex flex-col items-center justify-center p-12 text-center text-slate-500 gap-3 h-full">
-              <Trash2 className="w-10 h-10 text-slate-700" />
+              <Trash2 className="w-10 h-10 text-slate-400" />
               <div>
-                <p className="text-xs font-mono font-bold text-slate-400">NO DELETED ENTRIES FOUND</p>
+                <p className="text-xs font-mono font-bold text-slate-800">NO DELETED ENTRIES FOUND</p>
                 <p className="text-[11px] text-slate-500 max-w-sm mt-1">
                   Any job post deleted from your main desk can be restored instantly from this dashboard tab.
                 </p>
@@ -148,7 +171,7 @@ export default function Dashboard({
           ) : (
             <table className="w-full text-left border-collapse" id="job-spreadsheet-table">
               <thead className="bg-faction-panel-header sticky top-0 text-[10px] uppercase text-faction-text-muted font-bold border-b border-faction-border backdrop-blur-md z-10 font-mono tracking-wider">
-                {viewTab === "active" ? (
+                {viewTab !== "deleted" ? (
                   <tr>
                     <th className="px-4 py-2 text-center w-12 text-[9px]">Delete</th>
                     <th className="px-4 py-2 text-center w-12 text-[9px]">ID</th>
@@ -167,9 +190,9 @@ export default function Dashboard({
                   </tr>
                 )}
               </thead>
-              <tbody className="text-xs divide-y divide-slate-900 bg-transparent" id="job-spreadsheet-body">
-                {viewTab === "active" ? (
-                  jobs.map((job, index) => {
+              <tbody className="text-xs divide-y divide-slate-200 bg-white" id="job-spreadsheet-body">
+                {viewTab !== "deleted" ? (
+                  (viewTab === "submitted" ? submittedJobs : activeJobs).map((job, index) => {
                     const dateStr = new Date(job.dateCaptured).toLocaleDateString("en-US", {
                       month: "short",
                       day: "numeric",
@@ -179,8 +202,8 @@ export default function Dashboard({
                     return (
                       <tr
                         key={job.id}
-                        className={`hover:bg-[#1a2336]/40 transition-colors ${
-                          job.hasUnreadEmailUpdate ? "bg-orange-550/10" : ""
+                        className={`hover:bg-blue-50 transition-colors ${
+                          job.hasUnreadEmailUpdate ? "bg-orange-50" : ""
                         }`}
                         id={`job-row-${job.id}`}
                       >
@@ -188,7 +211,7 @@ export default function Dashboard({
                         <td className="px-4 py-3.5 text-center">
                           <button
                             onClick={() => onDeleteJob(job.id)}
-                            className="p-1 text-slate-500 hover:text-rose-400 rounded cursor-pointer hover:bg-rose-950/20 transition-colors"
+                            className="p-1 text-slate-500 hover:text-rose-600 rounded cursor-pointer hover:bg-rose-50 transition-colors"
                             title="Delete role"
                             id={`delete-job-${job.id}`}
                           >
@@ -212,31 +235,31 @@ export default function Dashboard({
                         </td>
 
                         {/* Job Title and Company */}
-                        <td className="px-4 py-3.5 text-slate-300">
+                        <td className="px-4 py-3.5 text-slate-900">
                           <div className="flex items-center gap-2">
-                            <span className="font-bold text-slate-100 leading-tight block font-sans">{job.title}</span>
+                            <span className="font-bold text-slate-950 leading-tight block font-sans">{job.title}</span>
                             {job.url && (
                               <a
                                 href={job.url}
                                 target="_blank"
                                 referrerPolicy="no-referrer"
-                                className="text-slate-500 hover:text-blue-400"
+                                className="text-slate-500 hover:text-blue-700"
                                 title="Open original job posting"
                               >
                                 <ExternalLink className="w-3 h-3" />
                               </a>
                             )}
                           </div>
-                          <div className="text-[10px] text-slate-450 flex items-center gap-1.5 mt-0.5">
-                            <span className="font-bold text-slate-300 font-mono">{job.company}</span>
-                            <span className="text-slate-700">•</span>
-                            <span>Captured {dateStr}</span>
+                          <div className="text-[10px] text-slate-600 flex items-center gap-1.5 mt-0.5">
+                            <span className="font-bold text-slate-700 font-mono">{job.company}</span>
+                            <span className="text-slate-400">•</span>
+                            <span className="text-slate-600">Captured {dateStr}</span>
                           </div>
                         </td>
 
                         {/* URL or Scraping Source Preview */}
-                        <td className="px-4 py-3.5 text-slate-400 max-w-[200px] truncate">
-                          <span className="text-[10px] font-mono text-slate-300 bg-[#131a2a] border border-slate-800/80 px-2 py-0.5 rounded">
+                        <td className="px-4 py-3.5 text-slate-700 max-w-[200px] truncate">
+                          <span className="text-[10px] font-mono text-slate-700 bg-slate-100 border border-slate-300 px-2 py-0.5 rounded">
                             {job.url.includes("indeed") ? "Indeed Scraping" : job.url.includes("linkedin") ? "LinkedIn Web" : "Manual Entry"}
                           </span>
                         </td>
@@ -244,7 +267,7 @@ export default function Dashboard({
                         {/* Gemini Match Status */}
                         <td className="px-4 py-3.5">
                           {job.status === "captured" && (
-                            <span className="px-2 py-0.5 bg-slate-900 text-slate-400 rounded text-[9px] font-bold font-mono border border-slate-800 inline-block uppercase tracking-wide">
+                            <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-[9px] font-bold font-mono border border-slate-300 inline-block uppercase tracking-wide">
                               Untailored
                             </span>
                           )}
@@ -256,7 +279,7 @@ export default function Dashboard({
                           {job.status === "tailored" && (
                             <div className="flex items-center gap-1.5">
                               <span className="px-2 py-0.5 bg-emerald-950/50 text-emerald-400 rounded text-[9px] font-bold font-mono border border-emerald-900/30 inline-block uppercase tracking-wide">
-                                Tailored ({job.matchScore || 90}% MATCH)
+                                Tailored ({typeof job.matchScore === "number" ? `${job.matchScore}%` : "Unscored"} MATCH)
                               </span>
                             </div>
                           )}
@@ -270,7 +293,7 @@ export default function Dashboard({
                               value={job.status}
                               onChange={(e) => onUpdateJobStatus(job.id, e.target.value as any)}
                               className={`px-2 py-0.5 rounded text-[9.5px] font-bold font-mono cursor-pointer border outline-none ${
-                                job.status === "submitted" ? "bg-slate-950 text-slate-300 border-slate-800" :
+                                job.status === "submitted" ? "bg-slate-900 text-white border-slate-800" :
                                 job.status === "denied" ? "bg-rose-950/60 text-rose-400 border-rose-900/30" :
                                 "bg-indigo-950/60 text-indigo-400 border-indigo-900/30"
                               }`}
@@ -317,7 +340,7 @@ export default function Dashboard({
                             {(job.status === "submitted" || job.status === "denied" || job.status === "interviewing") && (
                               <button
                                 onClick={() => onOpenManualReview(job)}
-                                className="px-2 py-0.5 text-slate-400 hover:text-slate-200 bg-slate-900 hover:bg-slate-800 rounded text-[10px] border border-slate-800 font-bold cursor-pointer"
+                                className="px-2 py-0.5 text-white bg-slate-900 hover:bg-slate-800 rounded text-[10px] border border-slate-800 font-bold cursor-pointer shadow-sm"
                               >
                                 PREVIEW
                               </button>
@@ -338,7 +361,7 @@ export default function Dashboard({
                     return (
                       <tr
                         key={job.id}
-                        className="hover:bg-slate-900/30 transition-colors text-slate-400 bg-transparent"
+                        className="hover:bg-slate-50 transition-colors text-slate-700 bg-white"
                         id={`deleted-job-row-${job.id}`}
                       >
                         {/* No. */}
@@ -347,15 +370,15 @@ export default function Dashboard({
                         </td>
 
                         {/* Job Title and Company */}
-                        <td className="px-4 py-3.5 text-slate-300">
+                        <td className="px-4 py-3.5 text-slate-900">
                           <div className="flex items-center gap-2">
-                            <span className="font-bold text-slate-200 leading-tight block">{job.title}</span>
+                            <span className="font-bold text-slate-950 leading-tight block">{job.title}</span>
                             {job.url && (
                               <a
                                 href={job.url}
                                 target="_blank"
                                 referrerPolicy="no-referrer"
-                                className="text-slate-500 hover:text-blue-400"
+                                className="text-slate-500 hover:text-blue-700"
                                 title="Open original job posting"
                               >
                                 <ExternalLink className="w-3 h-3" />
@@ -363,22 +386,22 @@ export default function Dashboard({
                             )}
                           </div>
                           <div className="text-[10px] text-slate-500 flex items-center gap-1.5 mt-0.5">
-                            <span className="font-bold text-slate-400 font-mono">{job.company}</span>
-                            <span className="text-slate-700">•</span>
+                            <span className="font-bold text-slate-700 font-mono">{job.company}</span>
+                            <span className="text-slate-400">•</span>
                             <span>Originally Captured {dateStr}</span>
                           </div>
                         </td>
 
                         {/* URL or Scraping Source Preview */}
-                        <td className="px-4 py-3.5 text-slate-400 max-w-[200px] truncate font-sans">
-                          <span className="text-[10px] font-mono text-faction-text-muted bg-faction-panel/50 border border-faction-border px-2 py-0.5 rounded">
+                        <td className="px-4 py-3.5 text-slate-700 max-w-[200px] truncate font-sans">
+                          <span className="text-[10px] font-mono text-slate-700 bg-slate-100 border border-slate-300 px-2 py-0.5 rounded">
                             {job.url.includes("indeed") ? "Indeed Scraping" : job.url.includes("linkedin") ? "LinkedIn Web" : "Manual Scraped"}
                           </span>
                         </td>
 
                         {/* Status Prior to Deletion */}
                         <td className="px-4 py-3.5">
-                          <span className="px-2 py-0.5 bg-rose-950/20 text-rose-400 rounded text-[9px] font-bold font-mono border border-rose-900/20 inline-block uppercase tracking-wide">
+                          <span className="px-2 py-0.5 bg-rose-50 text-rose-700 rounded text-[9px] font-bold font-mono border border-rose-200 inline-block uppercase tracking-wide">
                             DELETED IN STATUS: {job.status}
                           </span>
                         </td>
@@ -387,7 +410,7 @@ export default function Dashboard({
                         <td className="px-4 py-3.5 text-right pr-6">
                           <button
                             onClick={() => onRestoreJob && onRestoreJob(job.id)}
-                            className="px-3 py-1 bg-emerald-650/15 hover:bg-emerald-650/25 text-emerald-400 border border-emerald-500/20 rounded text-[10px] font-bold font-mono inline-flex items-center gap-1 cursor-pointer transition-all active:scale-95 shadow-md"
+                            className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 rounded text-[10px] font-bold font-mono inline-flex items-center gap-1 cursor-pointer transition-all active:scale-95 shadow-sm"
                             id={`restore-job-${job.id}`}
                           >
                             RESTORE DATA
@@ -408,64 +431,64 @@ export default function Dashboard({
         <div className="fixed inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fade-in">
           <div className="bg-faction-panel rounded shadow-2xl border border-faction-border max-w-lg w-full flex flex-col overflow-hidden max-h-[90vh]">
             <div className="p-4 border-b border-faction-border bg-faction-panel-header flex items-center justify-between">
-              <h3 className="text-xs font-bold font-mono uppercase tracking-widest text-slate-200 flex items-center gap-2">
+              <h3 className="text-xs font-bold font-mono uppercase tracking-widest text-slate-900 flex items-center gap-2">
                 <Plus className="w-4 h-4 text-blue-400" /> Add New Job Capture
               </h3>
               <button
                 onClick={() => setShowAddModal(false)}
-                className="text-slate-450 hover:text-slate-200 text-sm font-bold cursor-pointer font-mono"
+                className="text-slate-500 hover:text-slate-900 text-sm font-bold cursor-pointer font-mono"
               >
                 ✕
               </button>
             </div>
             <form onSubmit={handleSubmit} className="p-4 space-y-4 overflow-y-auto">
               <div>
-                <label className="block text-[10px] font-bold font-mono text-slate-450 uppercase mb-1">Job Title *</label>
+                <label className="block text-[10px] font-bold font-mono text-slate-700 uppercase mb-1">Job Title *</label>
                 <input
                   type="text"
                   required
                   placeholder="e.g. Senior Full-Stack Engineer"
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
-                  className="w-full text-xs p-2 bg-faction-bg border border-faction-border text-slate-100 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 font-sans placeholder-slate-600"
+                  className="w-full text-xs p-2 bg-white border border-slate-300 text-slate-950 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 font-sans placeholder-slate-400"
                 />
               </div>
               <div>
-                <label className="block text-[10px] font-bold font-mono text-slate-450 uppercase mb-1">Company *</label>
+                <label className="block text-[10px] font-bold font-mono text-slate-700 uppercase mb-1">Company *</label>
                 <input
                   type="text"
                   required
                   placeholder="e.g. Google, Spotify"
                   value={newCompany}
                   onChange={(e) => setNewCompany(e.target.value)}
-                  className="w-full text-xs p-2 bg-faction-bg border border-faction-border text-slate-100 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 font-sans placeholder-slate-600"
+                  className="w-full text-xs p-2 bg-white border border-slate-300 text-slate-950 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 font-sans placeholder-slate-400"
                 />
               </div>
               <div>
-                <label className="block text-[10px] font-bold font-mono text-slate-450 uppercase mb-1">Link / URL</label>
+                <label className="block text-[10px] font-bold font-mono text-slate-700 uppercase mb-1">Link / URL</label>
                 <input
                   type="url"
                   placeholder="e.g. https://www.indeed.com/viewjob?..."
                   value={newUrl}
                   onChange={(e) => setNewUrl(e.target.value)}
-                  className="w-full text-xs p-2 bg-faction-bg border border-faction-border text-slate-100 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 font-sans placeholder-slate-600"
+                  className="w-full text-xs p-2 bg-white border border-slate-300 text-slate-950 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 font-sans placeholder-slate-400"
                 />
               </div>
               <div>
-                <label className="block text-[10px] font-bold font-mono text-slate-450 uppercase mb-1">Raw Job Description Content</label>
+                <label className="block text-[10px] font-bold font-mono text-slate-700 uppercase mb-1">Raw Job Description Content</label>
                 <textarea
                   placeholder="Paste the full job description text or requirements from Indeed/LinkedIn..."
                   value={newDesc}
                   onChange={(e) => setNewDesc(e.target.value)}
                   rows={6}
-                  className="w-full text-xs p-2 bg-faction-bg border border-faction-border text-slate-100 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono placeholder-slate-600"
+                  className="w-full text-xs p-2 bg-white border border-slate-300 text-slate-950 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono placeholder-slate-400"
                 />
               </div>
               <div className="flex justify-end gap-2 pt-2 border-t border-faction-border font-mono text-[10px]">
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="px-3 py-1.5 text-slate-400 hover:bg-slate-900 rounded cursor-pointer"
+                  className="px-3 py-1.5 text-slate-700 hover:bg-slate-100 rounded cursor-pointer"
                 >
                   CANCEL
                 </button>

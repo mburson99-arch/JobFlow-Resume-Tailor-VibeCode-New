@@ -69,9 +69,9 @@ export default function Dashboard({
   };
 
   return (
-    <div className="flex-1 flex flex-col gap-3 min-w-0" id="pipeline-dashboard-view">
+    <div className="flex-1 flex flex-col gap-3 min-w-0 min-h-0" id="pipeline-dashboard-view">
       {/* Active Jobs Spreadsheet View */}
-      <section className="bg-faction-panel border border-faction-border rounded flex flex-col flex-1" id="job-spread-card">
+      <section className="bg-faction-panel border border-faction-border rounded flex flex-col flex-1 min-h-0" id="job-spread-card">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 border-b border-faction-border bg-faction-panel-header/90 rounded-t gap-2">
           <div className="flex items-center gap-4 flex-wrap">
             <div>

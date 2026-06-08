@@ -208,7 +208,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\patch-installed.ps1
 
 This script stops running JobFlow/Electron/Node processes, builds the app, copies the latest `dist/`, `electron/`, and `package.json` into the installed app directory, and then the app can be relaunched.
 
-## Interview Talking Points
+## Key Points
 
 - Built a full-stack local desktop app with React, Express, Electron, and Windows installer packaging.
 - Integrated Gemini through a provider abstraction with OpenRouter fallback and robust error recovery.
